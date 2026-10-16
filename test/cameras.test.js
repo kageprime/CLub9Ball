@@ -29,7 +29,7 @@ test('镜头：自动机位——自己瞄准用球后，电脑回合 / 球滚�
 
 test('镜头：循环切换、数字键映射、环绕限幅', () => {
   const rig = new CameraRig(0.8);
-  assert.equal(rig.next(), 'behind'); assert.equal(rig.next(-1), 'auto'); assert.equal(rig.next(-1), 'chase');
+  assert.equal(rig.next(), 'behind'); assert.equal(rig.next(-1), 'auto'); assert.equal(rig.next(-1), CAMS[CAMS.length - 1]);
   assert.equal(Object.keys(CAM_KEYS).length, CAMS.length);
   assert.deepEqual(Object.values(CAM_KEYS), CAMS);
   rig.nudgeOrbit(0, 99, 99); assert.ok(rig.orbit.pitch <= 1.45 && rig.orbit.dist <= 3.4);

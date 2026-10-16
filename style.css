@@ -203,3 +203,278 @@ body.free .cam-chip { pointer-events: auto; cursor: pointer; }
 
 #keys { bottom: 66px; right: 150px; }
 #cambar .cam-t { display: none; }
+
+/* ---------- 金币 HUD ---------- */
+.hud-coins {
+  position: absolute;
+  top: 22px;
+  right: 280px;
+  font-size: 13px;
+  color: var(--gold);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-color: var(--gold);
+  box-shadow: 0 -3px 0 0 var(--gold), 0 3px 0 0 #5a4210, -3px 0 0 0 var(--gold), 3px 0 0 0 #5a4210, 0 0 0 6px #000;
+  transition: transform .15s ease;
+}
+.hud-coins.pop {
+  transform: scale(1.15);
+}
+.coin-ico { font-size: 15px; }
+
+/* 联机按钮 */
+#btn-net {
+  top: 22px;
+  right: 150px;
+  color: var(--cyan);
+}
+
+/* ---------- 俄罗斯轮盘交互面板 ---------- */
+#roulette-ui {
+  position: fixed;
+  right: 22px;
+  top: 22px;
+  width: min(340px, 90vw);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 15;
+}
+.roulette-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 2px solid var(--edge-dark);
+  padding-bottom: 6px;
+}
+.roulette-title {
+  color: var(--gold);
+  font-size: 13px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+}
+.roulette-chips {
+  color: var(--green);
+  font-size: 11px;
+}
+.roulette-status {
+  background: #0d111c;
+  border: 2px solid var(--edge-dark);
+  padding: 8px 10px;
+  font-size: 11px;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: #ddd;
+  line-height: 1.4;
+}
+.roulette-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.rstat-box {
+  background: var(--panel-hi);
+  border: 1px solid var(--edge-dark);
+  padding: 6px 8px;
+  text-align: center;
+}
+.rstat-label {
+  display: block;
+  font-size: 9px;
+  color: var(--dim);
+  margin-bottom: 2px;
+}
+.rstat-val {
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--gold);
+}
+.roulette-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.roulette-btn-pull {
+  color: #fff !important;
+  background: #a32222 !important;
+  box-shadow: inset calc(var(--px) * -1) calc(var(--px) * -1) 0 #521111, inset var(--px) var(--px) 0 #cc3a3a, 0 0 0 var(--px) #000 !important;
+}
+.roulette-btn-pull:hover {
+  background: #c42a2a !important;
+}
+.roulette-subactions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.roulette-stake-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 11px;
+  margin: 3px 0;
+  background: #0f1220;
+  padding: 4px;
+}
+.rstat-sublabel {
+  color: var(--dim);
+}
+
+/* ---------- 国际象棋 Pixel Chess 弹窗 ---------- */
+#chess-modal {
+  z-index: 30;
+  background: rgba(8, 6, 12, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.chess-frame-wrapper {
+  width: min(92vw, 840px);
+  height: min(88vh, 720px);
+  background: #14121a;
+  box-shadow: 0 -4px 0 0 var(--gold), 0 4px 0 0 #5a4210, -4px 0 0 0 var(--gold), 4px 0 0 0 #5a4210, 0 0 0 8px #000, 0 0 30px rgba(0,0,0,0.8);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.chess-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #1f1b29;
+  padding: 10px 14px;
+  border-bottom: 3px solid #000;
+}
+.chess-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--gold);
+  letter-spacing: 1px;
+}
+.chess-dot {
+  width: 10px;
+  height: 10px;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+}
+.chess-controls {
+  display: flex;
+  gap: 8px;
+}
+.chess-body {
+  flex: 1;
+  width: 100%;
+  background: #000;
+  position: relative;
+}
+.chess-body iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+.chess-footer {
+  background: #15121c;
+  padding: 8px 14px;
+  border-top: 2px solid #2a2236;
+  text-align: center;
+}
+.chess-hint-text {
+  font-size: 9px;
+  color: var(--dim);
+}
+
+/* ---------- 多人同游联机弹窗 ---------- */
+.net-dialog {
+  min-width: min(480px, 92vw);
+}
+.sub-desc {
+  font-size: 10px;
+  color: var(--dim);
+  line-height: 1.6;
+  margin: 6px 0 16px;
+}
+.net-status-box {
+  background: #0d111c;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--cyan);
+  border: 2px solid var(--edge-dark);
+  margin-bottom: 14px;
+  min-height: 20px;
+}
+.net-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.net-join-row {
+  display: flex;
+  gap: 8px;
+}
+.net-join-row input {
+  flex: 1;
+  font: inherit;
+  font-size: 11px;
+  padding: 10px;
+  background: #0e1222;
+  color: var(--text);
+  border: 2px solid var(--edge-dark);
+  outline: none;
+}
+.net-join-row input:focus {
+  border-color: var(--gold);
+}
+.room-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #10162a;
+  padding: 10px 12px;
+  border: 2px solid var(--gold);
+  color: var(--gold);
+  font-size: 12px;
+}
+#net-peers-list {
+  font-size: 10px;
+  color: var(--dim);
+  margin: 6px 0;
+}
+.btn.danger {
+  color: #ff6a5a;
+  border-color: #ff6a5a;
+}
+
+/* ---------- 聊天输入条 ---------- */
+#chat-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  width: min(580px, 90vw);
+  z-index: 10;
+}
+#chat-bar input {
+  flex: 1;
+  font: inherit;
+  font-size: 11px;
+  padding: 10px 14px;
+  background: rgba(12, 14, 24, 0.94);
+  color: var(--text);
+  border: 0;
+  box-shadow: 0 -3px 0 0 var(--cyan), 0 3px 0 0 #0d2838, -3px 0 0 0 var(--cyan), 3px 0 0 0 #0d2838, 0 0 0 6px #000;
+  outline: none;
+}
+#chat-bar button {
+  white-space: nowrap;
+}

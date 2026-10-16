@@ -16,6 +16,8 @@ import { BOARD, BOARD_CENTER_Y, THROW_DIST } from './darts.js';
 import { TRAY, rackX, quatFaceUp } from './dice.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import * as TX from './textures.js';
+import { PICKUP_SPOTS } from './coins.js';
+import { Avatar, createAvatar } from './avatar.js';
 
 export const TABLE_Y = 0.80;             // 台面离地高度
 export const ROOM = { x0: -4.2, x1: 4.2, z0: -3.0, z1: 3.0, h: 3.2 };
@@ -32,6 +34,7 @@ export class World {
     this.pocketAnim = new Array(16).fill(null);
     this.props = {};
     this.flashAmt = 0; this.flashColor = new THREE.Color(1, 0.2, 0.1);
+    this.avatars = { player: null, opponent: null, dealer: null, bartender: null };
     // 相机平滑目标
     this.camPos = new V3(-2.4, 1.65, 0); this.camLook = new V3(0, 1.4, 0); this.camFov = 68;
     this.tgtPos = this.camPos.clone(); this.tgtLook = this.camLook.clone(); this.tgtFov = 68; this.camK = 30;
@@ -68,6 +71,10 @@ export class World {
     this._buildDarts();
     this._buildDiceProps();
     this._buildRevolver();
+    this._buildChessLounge();
+    this._buildBarOrder();
+    this._buildCoins();
+    this._buildAvatars();
     tick();
     await this._loadEnvironment(); tick();
     await this._loadBarModel(); tick();
@@ -258,18 +265,18 @@ export class World {
     this._box(0.04, 0.16, 0.4, new THREE.MeshBasicMaterial({ color: 0x40ff80 }), ROOM.x1 - 0.06, 2.25, -2.2, g, false);
 
     // 左墙：吧台 + 酒架 + 吧凳
-    const barZ = ROOM.z0 + 0.35;
-    this._box(6.4, 1.05, 0.7, this._wood(4, 1), 0, 0.525, barZ, g);
-    this._box(6.5, 0.07, 0.8, this._mat(0x1a0f08, { roughness: 0.3 }), 0, 1.075, barZ, g);
-    for (let i = 0; i < 3; i++) this._box(6.2, 0.04, 0.3, this._wood(4, 1), 0, 1.35 + i * 0.45, ROOM.z0 + 0.2, g);
+    const barZ = ROOM.z0 + 0.82;
+    this._box(6.4, 1.05, 0.65, this._wood(4, 1), 0, 0.525, barZ, g);
+    this._box(6.5, 0.07, 0.75, this._mat(0x1a0f08, { roughness: 0.3 }), 0, 1.075, barZ, g);
+    for (let i = 0; i < 3; i++) this._box(6.2, 0.04, 0.25, this._wood(4, 1), 0, 1.35 + i * 0.45, ROOM.z0 + 0.15, g);
     const rng = mulberry32(77);
     for (let i = 0; i < 38; i++) {
       const col = [0x2f6a2a, 0x5a2a12, 0x1c4a6a, 0x8a6a1a, 0x4a1a1a][(rng() * 5) | 0];
       const row = (rng() * 3) | 0, x = -3 + (i / 38) * 6;
-      this._cyl(0.035, 0.04, 0.26, new THREE.MeshStandardMaterial({ color: col, roughness: 0.2, metalness: 0.1 }), x, 1.5 + row * 0.45, ROOM.z0 + 0.22, g, 6);
+      this._cyl(0.035, 0.04, 0.26, new THREE.MeshStandardMaterial({ color: col, roughness: 0.2, metalness: 0.1 }), x, 1.5 + row * 0.45, ROOM.z0 + 0.18, g, 6);
     }
     for (let i = 0; i < 5; i++) {
-      const x = -2.4 + i * 1.2, z = barZ + 0.75;
+      const x = -2.4 + i * 1.2, z = barZ + 0.65;
       this._cyl(0.17, 0.17, 0.06, this._mat(0x6a1a14, { roughness: 0.5 }), x, 0.72, z, g, 10);
       this._cyl(0.025, 0.025, 0.7, this._mat(0x222222), x, 0.35, z, g, 6);
       this._cyl(0.15, 0.15, 0.03, this._mat(0x222222), x, 0.015, z, g, 10);
@@ -642,7 +649,7 @@ export class World {
 
   // ---------- 左轮道具 ----------
   _buildRevolver() {
-    const p = this.cfg?.props?.roulette?.pos || [-1.6, 1.115, ROOM.z0 + 0.3];
+    const p = this.cfg?.props?.roulette?.pos || [-1.6, 1.115, ROOM.z0 + 0.82];
     const g = new THREE.Group(); g.position.set(...p); this.scene.add(g);
     this._cyl(0.14, 0.14, 0.012, this._mat(0x1a0f08, { roughness: 0.6 }), 0, -0.004, 0, g, 12);   // 杯垫
     const steel = new THREE.MeshStandardMaterial({ color: 0x4a4d54, roughness: 0.35, metalness: 0.85 });
@@ -669,6 +676,192 @@ export class World {
   setRevolverCylinder(steps, instant = false) { this.cylTarget = (steps * Math.PI) / 3; if (instant) this.cylAngle = this.cylTarget; }
   hammerFall() { this.hammer.rotation.z = -0.1; setTimeout(() => { if (this.hammer) this.hammer.rotation.z = 0.5; }, 220); }
   flash(color = 0xff3a1a, amt = 0.85) { this.flashColor.set(color); this.postMat.uniforms.uFlashColor.value.copy(this.flashColor); this.flashAmt = amt; }
+
+  // ---------- 国际象棋展位 ----------
+  _buildChessLounge() {
+    const cp = this.cfg?.props?.chess?.pos || [-2.8, 0, 1.8];
+    const g = new THREE.Group(); g.position.set(cp[0], 0, cp[2]); this.scene.add(g);
+
+    // 茶几台面 (高 0.72m)
+    this._cyl(0.48, 0.48, 0.04, this._wood(2, 1), 0, 0.70, 0, g, 20);
+    this._cyl(0.045, 0.06, 0.68, this._mat(0x1a1a1a, { metalness: 0.7, roughness: 0.3 }), 0, 0.34, 0, g, 8);
+    this._cyl(0.28, 0.30, 0.03, this._mat(0x1a1a1a), 0, 0.015, 0, g, 12);
+
+    // 棋盘 (8x8 棋格，宽 0.36m)
+    const boardGroup = new THREE.Group(); boardGroup.position.set(0, 0.722, 0); g.add(boardGroup);
+    const sq = 0.36 / 8;
+    const lightTile = new THREE.MeshStandardMaterial({ color: 0xf0dfc2, roughness: 0.4 });
+    const darkTile = new THREE.MeshStandardMaterial({ color: 0x3a2012, roughness: 0.5 });
+    const tileGeo = new THREE.PlaneGeometry(sq * 0.96, sq * 0.96);
+
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const isDark = (r + c) % 2 === 1;
+        const tile = new THREE.Mesh(tileGeo, isDark ? darkTile : lightTile);
+        tile.rotation.x = -Math.PI / 2;
+        tile.position.set((c - 3.5) * sq, 0, (r - 3.5) * sq);
+        tile.receiveShadow = true;
+        boardGroup.add(tile);
+      }
+    }
+
+    // 棋子 (微缩低模)
+    const whitePieceMat = new THREE.MeshStandardMaterial({ color: 0xf5ede0, roughness: 0.35 });
+    const blackPieceMat = new THREE.MeshStandardMaterial({ color: 0x221a16, roughness: 0.4 });
+
+    const addPawn = (mat, x, z) => {
+      this._cyl(0.011, 0.013, 0.024, mat, x, 0.722 + 0.012, z, g, 8);
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.009, 8, 6), mat);
+      head.position.set(x, 0.722 + 0.028, z); g.add(head);
+    };
+    const addMajor = (mat, x, z, h = 0.038) => {
+      this._cyl(0.013, 0.016, h, mat, x, 0.722 + h / 2, z, g, 8);
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.01, 0.008, 8), mat);
+      cap.position.set(x, 0.722 + h + 0.004, z); g.add(cap);
+    };
+
+    // 白方棋子
+    for (let c = 0; c < 8; c++) addPawn(whitePieceMat, (c - 3.5) * sq, -1.5 * sq);
+    for (let c = 0; c < 8; c++) addMajor(whitePieceMat, (c - 3.5) * sq, -2.5 * sq, c === 3 || c === 4 ? 0.046 : 0.038);
+
+    // 黑方棋子
+    for (let c = 0; c < 8; c++) addPawn(blackPieceMat, (c - 3.5) * sq, 1.5 * sq);
+    for (let c = 0; c < 8; c++) addMajor(blackPieceMat, (c - 3.5) * sq, 2.5 * sq, c === 3 || c === 4 ? 0.046 : 0.038);
+
+    // 两张俱乐部单人扶手皮椅
+    const leather = this._mat(0x5a1810, { roughness: 0.6 });
+    const woodLeg = this._wood(1, 1);
+    const chair = (cz, ry) => {
+      const cg = new THREE.Group(); cg.position.set(0, 0, cz); cg.rotation.y = ry; g.add(cg);
+      this._box(0.5, 0.12, 0.48, leather, 0, 0.44, 0, cg);
+      this._box(0.5, 0.45, 0.1, leather, 0, 0.68, -0.2, cg);
+      this._box(0.09, 0.22, 0.46, leather, -0.28, 0.52, 0, cg);
+      this._box(0.09, 0.22, 0.46, leather, 0.28, 0.52, 0, cg);
+      for (const sx of [-0.22, 0.22]) for (const sz of [-0.18, 0.18]) {
+        this._box(0.04, 0.38, 0.04, woodLeg, sx, 0.19, sz, cg);
+      }
+    };
+    chair(-0.65, 0);
+    chair(0.65, Math.PI);
+
+    // 棋桌上方暖光吊灯
+    const lampG = new THREE.Group(); lampG.position.set(cp[0], 2.4, cp[2]); this.scene.add(lampG);
+    this._cyl(0.16, 0.08, 0.12, this._mat(0x222222, { metalness: 0.7 }), 0, 0, 0, lampG, 12);
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffe4aa }));
+    bulb.position.y = -0.04; lampG.add(bulb);
+    const light = new THREE.PointLight(0xffddaa, 3, 3.8);
+    light.position.set(cp[0], 2.2, cp[2]); this.scene.add(light);
+
+    this.props.chess = { id: 'chess', pos: new V3(cp[0], 0.8, cp[2]), radius: 1.35, labelKey: 'bar.chess' };
+  }
+
+  // ---------- 吧台点酒交互 ----------
+  _buildBarOrder() {
+    const p = [-0.6, 1.11, ROOM.z0 + 0.82];
+    const g = new THREE.Group(); g.position.set(...p); this.scene.add(g);
+    const glassMat = new THREE.MeshStandardMaterial({ color: 0xffd24a, roughness: 0.1, metalness: 0.2, transparent: true, opacity: 0.85 });
+    this._cyl(0.038, 0.035, 0.12, glassMat, 0, 0.06, 0, g, 10);
+    const foam = new THREE.Mesh(new THREE.CylinderGeometry(0.039, 0.038, 0.02, 10), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 }));
+    foam.position.y = 0.12; g.add(foam);
+    this._cyl(0.05, 0.05, 0.005, this._mat(0x1a0f08), 0, 0.002, 0, g, 10);
+
+    this.props.drink = { id: 'drink', pos: new V3(p[0], p[1], p[2]), radius: 1.1, labelKey: 'bar.drink' };
+  }
+
+  // ---------- 3D 金币拾取群 ----------
+  _buildCoins() {
+    this.coinMeshes = [];
+    const geo = new THREE.CylinderGeometry(0.075, 0.075, 0.016, 16);
+    const goldMat = new THREE.MeshStandardMaterial({
+      color: 0xffbb00,
+      metalness: 0.88,
+      roughness: 0.22,
+      emissive: 0x442800,
+    });
+
+    for (let i = 0; i < PICKUP_SPOTS.length; i++) {
+      const s = PICKUP_SPOTS[i];
+      const m = new THREE.Mesh(geo, goldMat);
+      m.position.set(s.x, s.y, s.z);
+      m.castShadow = true;
+      this.scene.add(m);
+      this.coinMeshes.push(m);
+    }
+  }
+
+  syncCoins(pickupList) {
+    if (!pickupList || !this.coinMeshes) return;
+    const t = this.time;
+    for (let i = 0; i < pickupList.length && i < this.coinMeshes.length; i++) {
+      const p = pickupList[i], m = this.coinMeshes[i];
+      m.visible = !!p.active;
+      if (p.active) {
+        m.position.set(p.x, p.y + Math.sin(t * 3.2 + p.bobPhase) * 0.04, p.z);
+        m.rotation.y = t * 2.6;
+        m.rotation.x = Math.PI / 8;
+      }
+    }
+  }
+
+  // ---------- 3D 人形角色 ----------
+  _buildAvatars() {
+    this.avatars = {
+      player: createAvatar('player'),
+      opponent: createAvatar('opponent'),
+      dealer: createAvatar('dealer'),
+      bartender: createAvatar('bartender'),
+    };
+    for (const [name, av] of Object.entries(this.avatars)) {
+      if (av) {
+        av.group.name = 'avatar_' + name;
+        this.scene.add(av.group);
+      }
+    }
+
+    // 默认 NPC 站位与待机动画
+    if (this.avatars.dealer && this.diceTrayGroup) {
+      this.avatars.dealer.setPosition(3.55, 0, -1.9);
+      this.avatars.dealer.setRotation(Math.PI);
+      this.avatars.dealer.play('sit_idle');
+    }
+    if (this.avatars.bartender) {
+      this.avatars.bartender.setPosition(-0.5, 0, ROOM.z0 + 0.3);
+      this.avatars.bartender.setRotation(Math.PI / 2);
+      this.avatars.bartender.play('bartender_wipe');
+    }
+    if (this.avatars.opponent) {
+      this.avatars.opponent.setPosition(HALF_L + 0.65, 0, HALF_W + 0.55);
+      this.avatars.opponent.setRotation(Math.PI * 0.75);
+      this.avatars.opponent.play('pool_watch');
+    }
+    if (this.avatars.player) {
+      this.avatars.player.setPosition(-2.3, 0, 0);
+      this.avatars.player.setRotation(0);
+      this.avatars.player.play('idle');
+      this.avatars.player.group.visible = false;
+    }
+  }
+
+  updateAvatars(dt) {
+    for (const av of Object.values(this.avatars)) {
+      if (av) av.update(dt);
+    }
+  }
+
+  setPlayerAvatar(state) {
+    if (!state) return;
+    const target = state.target || 'player';
+    const av = this.avatars[target];
+    if (!av) return;
+    if (state.visible != null) av.group.visible = state.visible;
+    if (state.x != null && state.z != null) av.setPosition(state.x, state.y ?? 0, state.z);
+    if (state.yaw != null) av.setRotation(state.yaw);
+    if (state.action) av.play(state.action);
+  }
+
+  setAvatarFirstPerson(name = 'player', enabled = true) {
+    this.avatars[name]?.setFirstPerson(enabled);
+  }
 
   // ---------- GLB 球房（可选） ----------
   async _loadBarModel() {
@@ -731,6 +924,7 @@ export class World {
   update(dt) {
     this.time += dt;
     this._updateCue(dt);
+    this.updateAvatars(dt);
     // 相机阻尼
     const a = 1 - Math.exp(-dt * this.camK);
     this.camPos.lerp(this.tgtPos, a); this.camLook.lerp(this.tgtLook, a);

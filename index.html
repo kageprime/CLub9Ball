@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>九号俱乐部 CLUB No.9</title>
+<title>CLUB No.9 · Pixel Pool & Lounge</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap">
 <link rel="stylesheet" href="style.css">
@@ -44,7 +44,9 @@
     <div class="balls" id="p2-balls"></div>
     <div class="combo" id="p2-combo"></div>
   </div>
+  <div class="panel hud-coins" id="hud-coins" title="Club Coins"><span class="coin-ico">🪙</span> <span id="coin-val">100</span></div>
   <button class="panel btn hud-btn" id="btn-free"><span data-i18n="hud.freeBall"></span> / <span class="alt" id="alt-free"></span></button>
+  <button class="panel btn hud-btn" id="btn-net"><span data-i18n="net.btn">Multiplayer</span></button>
   <button class="panel btn hud-btn" id="btn-settings"><span data-i18n="hud.settings"></span> / <span class="alt" id="alt-settings"></span></button>
   <div class="panel mode" id="mode-label"></div>
   <div id="turnbar" class="panel"><span id="turn-text"></span></div>
@@ -83,6 +85,39 @@
   <div id="dice-ranks" class="panel" hidden></div>
 </div>
 
+<!-- 俄罗斯轮盘交互面板 -->
+<div id="roulette-ui" class="panel" hidden>
+  <div class="roulette-header">
+    <span class="roulette-title" data-i18n="roulette.title">Russian Roulette</span>
+    <span id="roulette-chips" class="roulette-chips"></span>
+  </div>
+  <div id="roulette-status" class="roulette-status"></div>
+  <div class="roulette-stats">
+    <div class="rstat-box">
+      <span class="rstat-label" data-i18n="roulette.potLabel">Current Pot</span>
+      <span id="roulette-pot" class="rstat-val">0</span>
+    </div>
+    <div class="rstat-box">
+      <span class="rstat-label" data-i18n="roulette.oddsLabel">Survival Odds</span>
+      <span id="roulette-odds" class="rstat-val">83%</span>
+    </div>
+  </div>
+  <div class="roulette-actions">
+    <button class="btn big roulette-btn-pull" id="roulette-btn-pull" data-i18n="roulette.pullBtn">🎯 Pull Trigger [Space]</button>
+    <div class="roulette-subactions">
+      <button class="btn small" id="roulette-btn-spin" data-i18n="roulette.spinBtn">🔄 Spin [R]</button>
+      <button class="btn small" id="roulette-btn-cash" data-i18n="roulette.cashBtn">💰 Cash Out [Enter]</button>
+    </div>
+    <div class="roulette-stake-row">
+      <span class="rstat-sublabel" data-i18n="roulette.stakeLabel">Stake:</span>
+      <button class="btn small" id="roulette-stake-dec">-10</button>
+      <span id="roulette-stake-val">20</span>
+      <button class="btn small" id="roulette-stake-inc">+10</button>
+    </div>
+    <button class="btn small alt" id="roulette-btn-leave" data-i18n="roulette.leaveBtn">Stand Up [Q / Esc]</button>
+  </div>
+</div>
+
 <!-- 回放 -->
 <div id="replay" class="panel" hidden>
   <div class="replay-head"><span data-i18n="replay.title"></span> <span id="replay-time"></span></div>
@@ -101,18 +136,21 @@
 <!-- 开始 / 加载 -->
 <div id="start" class="overlay">
   <div class="sign">
-    <div class="cn" data-i18n="app.title"></div>
     <div class="en">CLUB No.9</div>
+    <div class="cn" data-i18n="app.sub">九号俱乐部</div>
   </div>
   <div id="loading"><span data-i18n="loading"></span> <span id="loading-n"></span></div>
   <div id="start-pick" hidden>
     <div class="modes" data-modes></div>
     <div class="diffrow" data-diffs></div>
   </div>
-  <button class="btn big" id="btn-start" hidden data-i18n="start.click"></button>
+  <div class="start-btn-row" style="display:flex;gap:8px;justify-content:center;align-items:center">
+    <button class="btn big" id="btn-start" hidden data-i18n="start.click"></button>
+    <button class="btn big" id="btn-customize" hidden style="background:#5a4a3a">👤 Avatar</button>
+  </div>
   <div class="sub" data-i18n="start.sub"></div>
   <div class="sub warn" id="start-touch" hidden data-i18n="start.spectate"></div>
-  <div class="langrow"><button class="btn small" data-lang="zh">中文</button><button class="btn small" data-lang="en">EN</button></div>
+  <div class="langrow"><button class="btn small" data-lang="en">EN</button><button class="btn small" data-lang="zh">中文</button></div>
 </div>
 
 <!-- 暂停 -->
@@ -122,6 +160,8 @@
     <div class="pz-label" data-i18n="pause.mode"></div>
     <div class="modes compact" data-modes></div>
     <div class="diffrow" data-diffs></div>
+    <button class="btn" id="pz-customize">👤 Customize Avatar</button>
+    <button class="btn" id="pz-net" data-i18n="net.btn">Multiplayer</button>
     <button class="btn" id="pz-settings" data-i18n="hud.settings"></button>
     <button class="btn" id="pz-about" data-i18n="settings.about"></button>
     <button class="btn" id="pz-quit" data-i18n="pause.quit"></button>
@@ -181,6 +221,61 @@
     <p data-i18n="about.proc"></p>
     <div class="field"><button class="btn small" id="about-close" data-i18n="about.close"></button></div>
   </div>
+</div>
+
+<!-- 国际象棋 Pixel Chess 嵌框 -->
+<div id="chess-modal" class="overlay" hidden>
+  <div class="chess-frame-wrapper">
+    <div class="chess-bar">
+      <div class="chess-title-wrap">
+        <span class="chess-dot"></span>
+        <span data-i18n="chess.title">Pixel Chess Lounge</span>
+      </div>
+      <div class="chess-controls">
+        <button class="btn small" id="chess-fs" data-i18n="chess.fullscreen">Fullscreen</button>
+        <button class="btn small" id="chess-close" data-i18n="chess.standUp">Stand Up [Q]</button>
+      </div>
+    </div>
+    <div class="chess-body">
+      <iframe id="chess-iframe" src="" allow="fullscreen; autoplay"></iframe>
+    </div>
+    <div class="chess-footer">
+      <span class="chess-hint-text" data-i18n="chess.hint">Q / ESC: Stand Up · Tap or Drag Pieces to Move</span>
+    </div>
+  </div>
+</div>
+
+<!-- 多人联机同游大厅面板 -->
+<div id="net-modal" class="overlay" hidden>
+  <div class="panel dialog net-dialog">
+    <h2 data-i18n="net.title">Multiplayer Hangout</h2>
+    <p class="sub-desc" data-i18n="net.desc">Hang out with friends in Club No.9! Play pool, chess, and chat in real-time.</p>
+    <div id="net-status" class="net-status-box"></div>
+    <div class="net-actions" id="net-actions-init">
+      <button class="btn big" id="net-btn-host" data-i18n="net.host">Create Room</button>
+      <div class="net-join-row">
+        <input type="text" id="net-code-input" maxlength="8" placeholder="Enter Room Code..." autocomplete="off">
+        <button class="btn" id="net-btn-join" data-i18n="net.join">Join Room</button>
+      </div>
+    </div>
+    <div class="net-actions" id="net-actions-connected" hidden>
+      <div class="room-info">
+        <span id="net-room-label"></span>
+        <button class="btn small" id="net-btn-copy" data-i18n="net.copyLink">Copy Invite Link</button>
+      </div>
+      <div id="net-peers-list"></div>
+      <button class="btn small danger" id="net-btn-leave" data-i18n="net.leave">Leave Room</button>
+    </div>
+    <div class="field" style="margin-top:14px">
+      <button class="btn small" id="net-modal-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- 即时聊天输入条 -->
+<div id="chat-bar" hidden>
+  <input type="text" id="chat-input" maxlength="60" placeholder="Say something in Club No.9 (Enter to send)..." autocomplete="off">
+  <button id="chat-send" class="btn small" data-i18n="net.send">Send</button>
 </div>
 
 <script type="module" src="src/main.js"></script>

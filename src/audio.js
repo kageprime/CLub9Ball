@@ -246,6 +246,14 @@ export class AudioEngine {
       case 'achieve':
         [660, 880, 1320].forEach((f, i) => setTimeout(() => this._tone({ freq: f, dur: 0.14, type: 'square', gain: 0.09 * gain }), i * 90));
         break;
+      case 'coin':
+        this._tone({ freq: 987.77, dur: 0.08, type: 'sine', gain: 0.16 * gain });
+        setTimeout(() => this._tone({ freq: 1318.51, dur: 0.22, type: 'sine', gain: 0.20 * gain }), 65);
+        break;
+      case 'drink':
+        this._burst({ dur: 0.18, freq: 1400, q: 2, gain: 0.3 * gain, wet: 0.4 });
+        setTimeout(() => this._tone({ freq: 2400, dur: 0.08, type: 'sine', gain: 0.15 * gain }), 80);
+        break;
       default: break;
     }
   }

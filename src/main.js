@@ -20,6 +20,11 @@ import { CameraRig, CAMS, CAM_KEYS } from './cameras.js';
 import { mulberry32 } from './rng.js';
 import { initLang, setLang, getLang, onLang, t, applyDom } from './i18n.js';
 import { BALL_R, HALF_L, HALF_W, POCKETS, colorOf, groupOf } from './table.js';
+import { CoinManager } from './coins.js';
+import { ChessMini } from './chess.js';
+import { Network } from './net.js';
+import { AvatarManager } from './avatars.js';
+import { openCustomizer } from './avatarCustomizer.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -40,6 +45,8 @@ const DIFF = {
 const G = {
   started: false, paused: false, spectate: false, opp: 'cpu', touch: false,
   mode: 'walk',
+  thirdPerson: false,
+  avatarsEnabled: true,
   player: { x: -2.3, z: 0, yaw: 0, pitch: -0.15 },
   aim: { angle: 0, power: 0.5, sx: 0, sy: 0, charging: false },
   cursor: { x: 0, y: 0 },  // 虚拟光标（NDC），自由球与飞镖用
@@ -61,7 +68,7 @@ if (!store.get('px360')) {
 const rig = new CameraRig(TABLE_Y);
 rig.set(G.settings.cam);
 
-let sim, world, audio, recorder, chips, aiRng;
+let sim, world, audio, recorder, chips, aiRng, coins, chessMini, avatars, net, netBroadcastTimer = 0;
 const snapBuf = new Float32Array(FRAME_FLOATS);
 const sampleBuf = new Float32Array(FRAME_FLOATS);
 const ACH_IDS = ['firstPot', 'combo3', 'breakPot', 'clear', 'eightWin', '180', 'diceStreak', 'roulette3'];
@@ -236,6 +243,17 @@ function startTurn(keepWalk = false) {
       if (G.lastTurn !== m.turn) { G.aim.angle = defaultAimAngle(); G.aim.power = 0.5; }
     }
   }
+  if (G.avatarsEnabled && world?.avatars?.opponent) {
+    if (!cpuTurn()) {
+      world.setPlayerAvatar({
+        target: 'opponent',
+        x: HALF_L + 0.65, z: HALF_W + 0.55,
+        yaw: Math.PI * 0.75,
+        action: 'pool_watch',
+        visible: G.settings.mode !== 'practice',
+      });
+    }
+  }
   G.lastTurn = m.turn;
   renderTurn(); renderKeyHint();
 }
@@ -256,8 +274,16 @@ function powerParams() {
 
 function doShoot(p) {
   if (!sim.cueOnTable() || sim.phase !== 'idle') return;
+  if (net && net.peer && !p._fromNet) net.sendPoolShot(p);
   const c = sim.ballPos(0);
   G.mode = 'striking'; G.camAngle = p.angle;
+  if (G.avatarsEnabled) {
+    const isCpu = isCpuPlayer(G.match?.turn ?? 0);
+    const shooter = isCpu ? world?.avatars?.opponent : world?.avatars?.player;
+    shooter?.play('pool_stroke', {
+      onFinish: () => shooter?.play('pool_watch'),
+    });
+  }
   world.setCue({ visible: true, x: c.x, z: c.z, angle: p.angle, sx: p.spinX, sy: p.spinY, pull: world.cueState.pull });
   // 滚动镜头（“球后”机位用）：从击球点后上方俯看
   const d = { x: Math.cos(p.angle), z: Math.sin(p.angle) };
@@ -328,12 +354,18 @@ function onShotEnd(report) {
     if (ev.type === 'pocket') {
       anyPot = true;
       (G.potted[m0.mode === 'practice' ? 0 : ev.player] ||= []).push(ev.ball);
-      if (!isCpuPlayer(shooter)) unlock('firstPot');
+      if (!isCpuPlayer(shooter)) {
+        unlock('firstPot');
+        coins?.earn(5, 'pot');
+      }
     } else if (ev.type === 'groupAssigned') {
       toast(t('msg.groupAssigned', { p: playerName(ev.player), g: t('hud.group.' + ev.group) }));
     } else if (ev.type === 'continue') {
       G.stats.best[shooter] = Math.max(G.stats.best[shooter], ev.combo);
-      if (ev.combo >= 2) { toast(t('msg.combo', { n: ev.combo })); }
+      if (ev.combo >= 2) {
+        toast(t('msg.combo', { n: ev.combo }));
+        if (!isCpuPlayer(shooter)) coins?.earn(5 * ev.combo, 'combo');
+      }
       if (ev.combo >= 3 && !isCpuPlayer(shooter)) unlock('combo3');
     } else if (ev.type === 'foul') {
       G.stats.fouls[ev.player]++;
@@ -347,7 +379,12 @@ function onShotEnd(report) {
     } else if (ev.type === 'gameEnd') {
       ended = ev;
       audio.play('cheer');
-      if (ev.reason === 'eightWin' && !isCpuPlayer(ev.winner)) unlock('eightWin');
+      if (ev.reason === 'eightWin' && !isCpuPlayer(ev.winner)) {
+        unlock('eightWin');
+        coins?.earn(50, 'pool_win');
+      } else if (!isCpuPlayer(ev.winner)) {
+        coins?.earn(30, 'pool_win');
+      }
     }
   }
   if (!isCpuPlayer(shooter) && G.wasBreak && anyPot && report.pocketed.some((b) => b !== 0 && b !== 8)) unlock('breakPot');
@@ -432,7 +469,7 @@ function confirmPlace() {
 
 // ---------------------------------------------------------------- 移动 / 碰撞
 function walkCollide(p) {
-  p.x = clamp(p.x, -3.9, 3.9); p.z = clamp(p.z, -1.7, 2.35);
+  p.x = clamp(p.x, -3.9, 3.9); p.z = clamp(p.z, -1.8, 2.5);
   const hx = HALF_L + 0.44 + 0.3, hz = HALF_W + 0.44 + 0.3;
   if (Math.abs(p.x) < hx && Math.abs(p.z) < hz) {
     const px = hx - Math.abs(p.x), pz = hz - Math.abs(p.z);
@@ -440,6 +477,9 @@ function walkCollide(p) {
   }
   const dx = p.x - 2.9, dz = p.z + 1.9, r = 0.95, d = Math.hypot(dx, dz);
   if (d < r) { p.x = 2.9 + (dx / (d || 1)) * r; p.z = -1.9 + (dz / (d || 1)) * r; }
+  // 国际象棋展桌碰撞
+  const cx = p.x - (-2.8), cz = p.z - 1.8, cr = 0.72, cd = Math.hypot(cx, cz);
+  if (cd < cr) { p.x = -2.8 + (cx / (cd || 1)) * cr; p.z = 1.8 + (cz / (cd || 1)) * cr; }
 }
 
 function updateWalk(dt) {
@@ -447,15 +487,28 @@ function updateWalk(dt) {
   const f = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0);
   const s = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0);
   const sp = (k.has('ShiftLeft') ? 3.0 : 1.7) * dt;
-  if (f || s) {
+  const isMoving = f !== 0 || s !== 0;
+  if (isMoving) {
     const fx = Math.cos(P.yaw), fz = Math.sin(P.yaw), rx = -fz, rz = fx;
     const l = Math.hypot(f, s);
     P.x += ((fx * f + rx * s) / l) * sp; P.z += ((fz * f + rz * s) / l) * sp;
     walkCollide(P);
   }
-  const eye = new THREE.Vector3(P.x, 1.65, P.z);
-  const look = eye.clone().add(new THREE.Vector3(Math.cos(P.yaw) * Math.cos(P.pitch), Math.sin(P.pitch), Math.sin(P.yaw) * Math.cos(P.pitch)));
-  world.setCameraTarget(eye, look, { fov: 68, k: 40 });
+  if (G.avatarsEnabled) {
+    world.setPlayerAvatar({
+      x: P.x, z: P.z, yaw: P.yaw,
+      action: isMoving ? 'walk' : 'idle',
+      visible: !!G.thirdPerson,
+    });
+  }
+  if (G.thirdPerson) {
+    const res = rig.compute('thirdPerson', false, { player: P, dt });
+    world.setCameraTarget(res.pos, res.look, { fov: res.fov, k: res.k });
+  } else {
+    const eye = new THREE.Vector3(P.x, 1.65, P.z);
+    const look = eye.clone().add(new THREE.Vector3(Math.cos(P.yaw) * Math.cos(P.pitch), Math.sin(P.pitch), Math.sin(P.yaw) * Math.cos(P.pitch)));
+    world.setCameraTarget(eye, look, { fov: 68, k: 40 });
+  }
   // 酒吧道具提示
   let near = null, nd = 1e9;
   for (const pr of Object.values(world.props)) {
@@ -478,6 +531,15 @@ function updateAim(dt) {
   world.setCue({ visible: true, x: c.x, z: c.z, angle: a.angle, pull, elev: 0.07, sx: a.sx, sy: a.sy });
   world.setAimLine(G.settings.aimline ? sim.aimTrace(a.angle) : null);
   G.camAngle = a.angle; driveCamera('aim');
+  if (G.avatarsEnabled && c) {
+    const ax = c.x - Math.cos(a.angle) * 0.85;
+    const az = c.z - Math.sin(a.angle) * 0.85;
+    world.setPlayerAvatar({
+      x: ax, z: az, yaw: a.angle,
+      action: 'pool_stance',
+      visible: G.thirdPerson,
+    });
+  }
   $('prompt').hidden = true;
 }
 
@@ -573,12 +635,20 @@ function updateCpu(dt) {
     G.camAngle = cpu.angle;
     world.setCue({ visible: true, x: c.x, z: c.z, angle: cpu.angle, pull: 0.05, elev: 0.07, sx: s.spinX, sy: s.spinY });
     world.setAimLine(G.settings.aimline ? sim.aimTrace(cpu.angle) : null);
+    if (G.avatarsEnabled && c) {
+      const ax = c.x - Math.cos(cpu.angle) * 0.85, az = c.z - Math.sin(cpu.angle) * 0.85;
+      world.setPlayerAvatar({ target: 'opponent', x: ax, z: az, yaw: cpu.angle, action: 'pool_stance', visible: true });
+    }
     if (u >= 1) { cpu.phase = 'draw'; cpu.drawT = 0; renderTurn(); }
   } else if (cpu.phase === 'draw') {
     cpu.drawT += dt;
     const c = sim.ballPos(0), s = cpu.shot, u = Math.min(1, cpu.drawT / 0.7);
     G.camAngle = s.angle;
     world.setCue({ visible: true, x: c.x, z: c.z, angle: s.angle, pull: 0.05 + u * s.power * 0.26, elev: 0.07, sx: s.spinX, sy: s.spinY });
+    if (G.avatarsEnabled && c) {
+      const ax = c.x - Math.cos(s.angle) * 0.85, az = c.z - Math.sin(s.angle) * 0.85;
+      world.setPlayerAvatar({ target: 'opponent', x: ax, z: az, yaw: s.angle, action: 'pool_stroke', visible: true });
+    }
     if (u >= 1) {
       cpu.phase = 'fired';
       world.cueState.pull = 0.05 + s.power * 0.26;
@@ -600,12 +670,18 @@ function enterMini(id) {
   G.mode = id; $('prompt').hidden = true; world.setCue({ visible: false }); world.setAimLine(null);
   G.cursor.x = G.cursor.y = 0;
   document.body.classList.add('in-mini');
+  if (id === 'chess' || id === 'roulette') {
+    try { document.exitPointerLock?.(); } catch (_) {}
+    document.body.classList.add('free');
+  }
   games[id].enter();
   renderKeyHint();
 }
 function leaveMini() {
   games[G.mode]?.leave?.();
-  mini.hide(); setReticle(false); G.mode = 'walk'; document.body.classList.remove('in-mini'); renderKeyHint();
+  mini.hide();
+  if ($('roulette-ui')) $('roulette-ui').hidden = true;
+  setReticle(false); G.mode = 'walk'; document.body.classList.remove('in-mini'); renderKeyHint();
 }
 
 const games = {
@@ -618,8 +694,19 @@ const games = {
       const sp = world.props.darts.spot;
       this.eye = new THREE.Vector3(sp.x, 1.72, sp.z);
       world.setCameraTarget(this.eye, world.dartToWorld(0, 0), { fov: 24, k: 12 });
+      if (G.avatarsEnabled) {
+        world.setPlayerAvatar({
+          x: sp.x, z: sp.z,
+          yaw: 0,
+          action: 'dart_stance',
+          visible: true,
+        });
+      }
     },
-    leave() { world.flyingDart.visible = false; world.clearDarts(); this.game.reset(); },
+    leave() {
+      world.flyingDart.visible = false; world.clearDarts(); this.game.reset();
+      if (G.avatarsEnabled) world.avatars.player?.play('idle');
+    },
     onMouse(dx, dy) { this.aim.x = clamp(this.aim.x + dx * 0.00028, -0.24, 0.24); this.aim.y = clamp(this.aim.y - dy * 0.00028, -0.24, 0.24); },
     sway() { const t = this.t; return { x: 0.006 * Math.sin(t * 1.9) + 0.003 * Math.sin(t * 5.3), y: 0.006 * Math.cos(t * 1.4) + 0.003 * Math.cos(t * 4.7) }; },
     onClick() {
@@ -628,6 +715,11 @@ const games = {
       const r = this.game.throwDart({ x: this.aim.x + sw.x, y: this.aim.y + sw.y }, { power: 0.5 });
       this.flying = { r, t: 0, from: this.eye.clone().add(new THREE.Vector3(0.3, -0.12, 0.08)), to: world.dartToWorld(r.x, r.y) };
       world.flyingDart.visible = true; audio.play('click');
+      if (G.avatarsEnabled) {
+        world.avatars.player?.play('dart_throw', {
+          onFinish: () => world.avatars.player?.play('dart_stance'),
+        });
+      }
     },
     update(dt) {
       this.t += dt;
@@ -644,7 +736,10 @@ const games = {
           this.lastText = f.r.ring === 'miss' ? t('darts.ring.miss') : (f.r.ring === 'bull' || f.r.ring === 'outerBull') ? `${t('darts.ring.' + f.r.ring)} (${f.r.score})` : t('darts.hit', { ring: t('darts.ring.' + f.r.ring), sector: f.r.sector, score: f.r.score });
           if (f.r.roundDone) {
             toast(t('darts.roundEnd', { s: f.r.roundScore }), 2200);
-            if (f.r.events.some((e) => e.type === 'badge')) { unlock('180'); toast(t('darts.180'), 3200); audio.play('cheer'); }
+            if (f.r.events.some((e) => e.type === 'badge')) {
+              unlock('180'); toast(t('darts.180'), 3200); audio.play('cheer');
+              if (G.avatarsEnabled) world.avatars.player?.play('dart_celebrate', { onFinish: () => world.avatars.player?.play('dart_stance') });
+            }
             this.clearAt = performance.now() + 1800;
           }
           this.flying = null;
@@ -663,57 +758,147 @@ const games = {
 
   // ---- 俄罗斯轮盘
   roulette: {
-    r: null, stake: 20, active: false, banked: 1, survived: 0, cyl: 0, text: '',
+    r: null, stake: 20, active: false, banked: 1, survived: 0, cyl: 0, text: '', bound: false,
+    _bindUI() {
+      if (this.bound) return;
+      this.bound = true;
+      $('roulette-btn-pull')?.addEventListener('click', () => this.doPull());
+      $('roulette-btn-spin')?.addEventListener('click', () => this.doSpin());
+      $('roulette-btn-cash')?.addEventListener('click', () => this.doCash());
+      $('roulette-btn-leave')?.addEventListener('click', () => leaveMini());
+      $('roulette-stake-dec')?.addEventListener('click', () => this.changeStake(-10));
+      $('roulette-stake-inc')?.addEventListener('click', () => this.changeStake(10));
+    },
     enter() {
+      this._bindUI();
       if (!this.r) this.r = new Roulette({ seed: (Math.random() * 1e9) | 0 });
       const p = world.props.roulette.pos;
       this.cam = [new THREE.Vector3(p.x + 0.62, p.y + 0.3, p.z + 0.2), new THREE.Vector3(p.x, p.y + 0.05, p.z)];
       world.setCameraTarget(this.cam[0], this.cam[1], { fov: 40, k: 10 });
+      if (G.avatarsEnabled && world.avatars.player) {
+        world.avatars.player.group.visible = false;
+      }
+      try { document.exitPointerLock?.(); } catch (_) {}
+      document.body.classList.add('free');
+      if ($('roulette-ui')) $('roulette-ui').hidden = false;
+      this.render();
     },
-    leave() { if (this.active) { this.active = false; this.text = ''; } },
+    leave() {
+      if (this.active) { this.active = false; this.text = ''; }
+      if ($('roulette-ui')) $('roulette-ui').hidden = true;
+      if (G.avatarsEnabled && world.avatars.player) {
+        world.avatars.player.group.visible = !!G.thirdPerson;
+        world.avatars.player?.play('idle');
+      }
+    },
     pot() { return Math.round(this.stake * this.banked * this.r.multiplier()); },
-    onKey(code) {
+    changeStake(delta) {
+      if (this.active) return;
+      this.stake = Math.max(10, Math.min(Math.max(10, chips.balance), this.stake + delta));
+      this.render();
+    },
+    doPull() {
       if (!this.active) {
-        if (code === 'ArrowUp') this.stake = Math.min(Math.max(10, chips.balance), this.stake + 10);
-        else if (code === 'ArrowDown') this.stake = Math.max(10, this.stake - 10);
-        else if (code === 'Space') {
-          if (!chips.bet(this.stake)) { toast(t('dice.noChips'), 1400); return; }
+        if (chips.balance < this.stake) {
+          chips.balance = Math.max(50, this.stake);
           saveChips();
-          this.r.reset(); this.active = true; this.banked = 1; this.survived = 0; this.text = '';
-          this.cyl += 1 + ((Math.random() * 6) | 0); world.setRevolverCylinder(this.cyl); audio.play('rattle');
+          toast(t('roulette.chips', { n: chips.balance }), 1500);
         }
+        if (!chips.bet(this.stake)) { toast(t('dice.noChips'), 1400); return; }
+        saveChips();
+        this.r.reset(); this.active = true; this.banked = 1; this.survived = 0; this.text = '';
+        this.cyl += 1 + ((Math.random() * 6) | 0); world.setRevolverCylinder(this.cyl); audio.play('rattle');
+        this.render();
         return;
       }
-      if (code === 'Space') {
-        const res = this.r.pull();
-        this.cyl += 1; world.setRevolverCylinder(this.cyl); world.hammerFall();
-        if (res.bang) {
-          audio.play('bang'); world.flash(0xff2a14, 0.9);
-          this.text = t('roulette.bang', { n: this.stake }); this.active = false;
-          if (chips.balance < 10) chips.balance = 50; saveChips();
-        } else {
-          audio.play('click'); this.survived++; this.text = t('roulette.click');
-          if (this.survived >= 3) unlock('roulette3');
-        }
-      } else if (code === 'KeyR') {
-        this.banked *= this.r.multiplier(); this.r.spin(); this.cyl += 2 + ((Math.random() * 6) | 0);
-        world.setRevolverCylinder(this.cyl); audio.play('rattle');
-      } else if (code === 'Enter') {
-        const win = this.pot(); chips.pay(win); saveChips();
-        this.text = t('roulette.cash', { n: win - this.stake }); this.active = false; audio.play('cheer');
+      const res = this.r.pull();
+      this.cyl += 1; world.setRevolverCylinder(this.cyl); world.hammerFall();
+      if (res.bang) {
+        audio.play('bang'); world.flash(0xff2a14, 0.9);
+        this.text = t('roulette.bang', { n: this.stake }); this.active = false;
+        if (chips.balance < 10) chips.balance = 50; saveChips();
+      } else {
+        audio.play('click'); this.survived++; this.text = t('roulette.click');
+        if (this.survived >= 3) unlock('roulette3');
       }
+      this.render();
+    },
+    doSpin() {
+      if (!this.active) return;
+      this.banked *= this.r.multiplier(); this.r.spin(); this.cyl += 2 + ((Math.random() * 6) | 0);
+      world.setRevolverCylinder(this.cyl); audio.play('rattle');
+      this.text = t('roulette.spin');
+      this.render();
+    },
+    doCash() {
+      if (!this.active) return;
+      const win = this.pot(); chips.pay(win); saveChips();
+      this.text = t('roulette.cash', { n: win - this.stake }); this.active = false; audio.play('cheer');
+      this.render();
+    },
+    onKey(code) {
+      if (code === 'ArrowUp') this.changeStake(10);
+      else if (code === 'ArrowDown') this.changeStake(-10);
+      else if (code === 'Space') this.doPull();
+      else if (code === 'KeyR') this.doSpin();
+      else if (code === 'Enter') this.doCash();
+    },
+    render() {
+      if ($('roulette-chips')) $('roulette-chips').textContent = t('roulette.chips', { n: chips.balance });
+      if ($('roulette-pot')) $('roulette-pot').textContent = this.active ? `${this.pot()} 🪙` : '0 🪙';
+      if ($('roulette-odds')) $('roulette-odds').textContent = `${Math.round(this.r ? this.r.safeOdds() * 100 : 83.3)}%`;
+      if ($('roulette-stake-val')) $('roulette-stake-val').textContent = this.stake;
+      if ($('roulette-status')) {
+        $('roulette-status').textContent = this.text || (this.active ? t('roulette.pullPrompt') : t('roulette.readyPrompt'));
+      }
+      if ($('roulette-btn-pull')) {
+        $('roulette-btn-pull').textContent = this.active ? t('roulette.pullAgainBtn') : `${t('roulette.pullBtn')} (${this.stake})`;
+      }
+      if ($('roulette-btn-spin')) $('roulette-btn-spin').disabled = !this.active;
+      if ($('roulette-btn-cash')) $('roulette-btn-cash').disabled = !this.active;
+      if ($('roulette-stake-dec')) $('roulette-stake-dec').disabled = this.active;
+      if ($('roulette-stake-inc')) $('roulette-stake-inc').disabled = this.active;
     },
     update() {
       world.setCameraTarget(this.cam[0], this.cam[1], { fov: 40, k: 10 });
-      const lines = [t('roulette.chips', { n: chips.balance }), t('roulette.stake', { n: this.stake })];
-      if (this.active) { lines.push(t('roulette.pot', { n: this.pot() })); lines.push(t('roulette.odds', { p: Math.round(this.r.safeOdds() * 100) })); }
-      else lines.push(t('roulette.start', { n: this.stake }));
-      if (this.text) lines.push(this.text);
-      mini.show(t('roulette.title'), lines, t('roulette.hint'));
     },
   },
+
+  // ---- 国际象棋 (Pixel Chess Live Link)
+  chess: {
+    enter() {
+      chessMini?.enter({ roomCode: net?.roomCode });
+    },
+    leave() {
+      chessMini?.leave();
+    },
+    onKey(code) {
+      chessMini?.onKey(code);
+    },
+    update() {},
+  },
+
+  // ---- 吧台点饮品
+  drink: {
+    enter() {
+      if (coins?.spend(10, 'drink')) {
+        audio?.play('drink');
+        world?.flash(0xffaa22, 0.45);
+        toast(t('coins.drinkBought'), 2400);
+      } else {
+        audio?.play('foul');
+        toast(t('coins.notEnough'), 1500);
+      }
+      setTimeout(() => leaveMini(), 400);
+    },
+    leave() {},
+    update() {},
+  },
 };
-function saveChips() { store.set('chips', chips.balance); }
+function saveChips() {
+  coins?.save();
+  if (chips) store.set('chips', chips.balance);
+}
 G.games = games; G.startTurn = () => startTurn(); G.showOver = showOver;
 
 // ---------------------------------------------------------------- 输入
@@ -753,7 +938,11 @@ document.addEventListener('pointerlockchange', () => {
   if (!locked && G.mode !== 'replay' && !anyDialog()) showPause(true);
   if (locked) showPause(false);
 });
-function anyDialog() { return !$('settings').hidden || !$('about').hidden || !$('over').hidden; }
+function anyDialog() {
+  const rEl = $('roulette-ui');
+  const isRouletteOpen = rEl && !rEl.hidden;
+  return !$('settings').hidden || !$('about').hidden || !$('over').hidden || !$('net-modal').hidden || !$('chess-modal').hidden || isRouletteOpen || G.mode === 'chess' || G.mode === 'roulette';
+}
 
 document.addEventListener('mousemove', (e) => {
   if (document.pointerLockElement !== canvas || G.paused) return;
@@ -785,22 +974,47 @@ document.addEventListener('wheel', (e) => {
 document.addEventListener('keydown', (e) => {
   if (!G.started) return;
   const c = e.code;
+
+  // 打字输入中忽略游戏快捷键
+  if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+    if (c === 'Escape') {
+      $('chat-bar').hidden = true;
+      document.activeElement.blur();
+      lock();
+    }
+    return;
+  }
+
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(c)) e.preventDefault();
+  if (c === 'Tab') {
+    if (G.mode === 'walk' || G.mode === 'aim') {
+      G.thirdPerson = !G.thirdPerson;
+      world.setAvatarFirstPerson('player', !G.thirdPerson);
+      if (world.avatars?.player) world.avatars.player.group.visible = !!G.thirdPerson;
+      toast(G.thirdPerson ? 'View: 3rd Person' : 'View: 1st Person', 800);
+    }
+    return;
+  }
   if (c === 'KeyM') { const m = audio.toggleMute(); toast(t(m ? 'msg.muted' : 'msg.unmuted'), 1000); return; }
   if (c === 'Escape' && G.mode !== 'replay') {
-    if (G.paused) { resumeGame(); return; }                                  // Esc 再按一次 = 继续
-    if (document.pointerLockElement !== canvas) { showPause(true); return; } // 没有指针锁时（含观战）随时可暂停
+    if (G.paused) { resumeGame(); return; }
+    if (G.mode === 'darts' || G.mode === 'dice' || G.mode === 'roulette' || G.mode === 'chess' || G.mode === 'drink') {
+      leaveMini();
+      return;
+    }
+    if (document.pointerLockElement !== canvas && !anyDialog()) { showPause(true); return; }
   }
   if (G.paused) return;
   G.keys.add(c);
   if (!$('over').hidden) { if (c === 'Enter') rematch(); return; }
+  if (c === 'Enter' && G.mode === 'walk') { openChatBar(); return; }
   if (G.mode === 'replay') {
     if (c === 'KeyV' || c === 'Escape') exitReplay();
     else if (c === 'Space') { const r = G.replay; if (r.finished) { r.seek(0); r.playing = true; } else r.playing = !r.playing; }
     return;
   }
-  if (G.mode === 'darts' || G.mode === 'dice' || G.mode === 'roulette') {
-    if (c === 'KeyQ') leaveMini(); else games[G.mode].onKey?.(c);
+  if (G.mode === 'darts' || G.mode === 'dice' || G.mode === 'roulette' || G.mode === 'chess' || G.mode === 'drink') {
+    if (c === 'KeyQ') leaveMini(); else games[G.mode]?.onKey?.(c);
     return;
   }
   // 镜头：1–7 直达，C / Shift+C 循环
@@ -911,8 +1125,112 @@ function bindUI() {
   $('rp-seek').oninput = (e) => { const r = G.replay; if (!r) return; r.playing = false; r.seek(+e.target.value / 1000); };
   $('rp-speed').oninput = (e) => { const r = G.replay; if (!r) return; r.setSpeed(+e.target.value); $('rp-speed-val').textContent = r.speed.toFixed(2).replace(/0$/, '') + '×'; };
   $('rp-close').onclick = () => exitReplay();
-  $('alt-free').textContent = '自由球'; $('alt-settings').textContent = '设置';
-  onLang(() => { renderPickers(); renderCamBar(); if (G.match) renderHUD(); renderBadges(); $('alt-free').textContent = getLang() === 'zh' ? 'FREE BALL' : '自由球'; $('alt-settings').textContent = getLang() === 'zh' ? 'SETTINGS' : '设置'; if (G.replay) updateReplayUI(); if (!$('about').hidden) fillAbout(); });
+  const onCust = () => {
+    openCustomizer(0, (cfg, slot) => {
+      if (slot === 0 && world?.avatars?.player) world.avatars.player.applyConfig(cfg);
+      else if (slot === 1 && world?.avatars?.opponent) world.avatars.opponent.applyConfig(cfg);
+    });
+  };
+  if ($('btn-customize')) $('btn-customize').onclick = onCust;
+  if ($('pz-customize')) $('pz-customize').onclick = onCust;
+  $('btn-net').onclick = () => openNetModal();
+  $('pz-net').onclick = () => { closePanel('pause'); openNetModal(); };
+  $('net-modal-close').onclick = () => closeNetModal();
+  $('net-btn-host').onclick = async () => {
+    $('net-status').textContent = 'Creating room…';
+    try {
+      const code = await net.hostRoom();
+      updateNetUI();
+    } catch (err) {
+      $('net-status').textContent = t('net.failed') + ' (' + err.message + ')';
+    }
+  };
+  $('net-btn-join').onclick = async () => {
+    const val = $('net-code-input').value.trim();
+    if (!val) return;
+    $('net-status').textContent = t('net.connecting', { id: val });
+    try {
+      await net.joinRoom(val);
+      updateNetUI();
+    } catch (err) {
+      $('net-status').textContent = t('net.failed');
+    }
+  };
+  $('net-btn-copy').onclick = () => {
+    if (!net?.roomCode) return;
+    const url = new URL(location.href);
+    url.searchParams.set('room', net.roomCode);
+    navigator.clipboard?.writeText(url.toString()).then(() => {
+      toast(t('net.copied'), 2000);
+    });
+  };
+  $('net-btn-leave').onclick = () => {
+    net?.leave();
+    avatars?.clear();
+    updateNetUI();
+  };
+
+  $('chat-send').onclick = () => submitChat();
+  $('chat-input').onkeydown = (e) => {
+    if (e.key === 'Enter') {
+      submitChat();
+    } else if (e.key === 'Escape') {
+      $('chat-bar').hidden = true;
+      $('chat-input').blur();
+      lock();
+    }
+  };
+
+  $('alt-free').textContent = 'FREE BALL'; $('alt-settings').textContent = 'SETTINGS';
+  onLang(() => { renderPickers(); renderCamBar(); if (G.match) renderHUD(); renderBadges(); $('alt-free').textContent = getLang() === 'zh' ? '自由球' : 'FREE BALL'; $('alt-settings').textContent = getLang() === 'zh' ? '设置' : 'SETTINGS'; if (G.replay) updateReplayUI(); if (!$('about').hidden) fillAbout(); });
+}
+
+function openNetModal() {
+  $('net-modal').hidden = false;
+  $('pause').hidden = true;
+  document.exitPointerLock?.();
+  document.body.classList.add('free');
+  updateNetUI();
+}
+function closeNetModal() {
+  $('net-modal').hidden = true;
+  if (!anyDialog() && G.started && !G.spectate) showPause(true);
+}
+function updateNetUI() {
+  const isConnected = !!(net && net.peer && net.roomCode);
+  $('net-actions-init').hidden = isConnected;
+  $('net-actions-connected').hidden = !isConnected;
+  if (isConnected) {
+    $('net-status').textContent = t('net.connected', { id: net.roomCode });
+    $('net-room-label').textContent = `${t('chess.roomCode')}: ${net.roomCode}`;
+    const peerCount = (net.conns?.size || 0) + 1;
+    $('net-peers-list').textContent = t('net.online', { n: peerCount });
+  } else {
+    $('net-status').textContent = '';
+  }
+}
+
+function openChatBar() {
+  $('chat-bar').hidden = false;
+  document.exitPointerLock?.();
+  document.body.classList.add('free');
+  $('chat-input').value = '';
+  $('chat-input').focus();
+}
+
+function submitChat() {
+  const text = $('chat-input').value.trim();
+  if (text) {
+    if (net && net.peer) {
+      net.sendChat(text);
+    } else {
+      toast(text, 2500);
+    }
+  }
+  $('chat-bar').hidden = true;
+  $('chat-input').value = '';
+  $('chat-input').blur();
+  lock();
 }
 
 // ---------------------------------------------------------------- 主循环
@@ -954,10 +1272,26 @@ function update(dt) {
     case 'striking': driveCamera('aim'); break;
     case 'rolling': driveCamera('roll'); break;
     case 'replay': updateReplay(dt); break;
-    case 'darts': case 'dice': case 'roulette': games[G.mode].update(dt); break;
+    case 'darts': case 'dice': case 'roulette': case 'chess': case 'drink': games[G.mode]?.update?.(dt); break;
     default: break;
   }
   if (G.mode !== 'darts' && G.mode !== 'place') setReticle(false);
+
+  // 金币与网络同步
+  if (coins) {
+    coins.update(G.player, dt);
+    world.syncCoins(coins.pickups);
+  }
+  if (avatars) {
+    avatars.update(dt);
+  }
+  if (net && net.peer && G.started) {
+    netBroadcastTimer = (netBroadcastTimer || 0) + dt;
+    if (netBroadcastTimer > 0.066) {
+      netBroadcastTimer = 0;
+      net.sendState({ x: G.player.x, z: G.player.z, yaw: G.player.yaw, act: G.mode, coins: coins.balance });
+    }
+  }
 
   // 进球特写镜头压过一切机位
   if (G.closeup) { world.setCameraTarget(G.closeup.pos, G.closeup.look, { fov: 46, k: 8 }); G.lamps = true; }
@@ -981,7 +1315,6 @@ async function boot() {
   if (G.touch) { document.body.classList.add('touch'); $('start-touch').hidden = false; G.settings.mode = 'watch'; }
   renderPickers(); renderCamBar();
   try { await RAPIER.init(); } catch (e) { $('loading').textContent = 'Rapier 加载失败：' + e; return; }
-  chips = new Chips(store.get('chips', 100)); if (chips.balance < 5) chips.balance = 50;
   aiRng = mulberry32(99); aiRng.gauss = aiRng.gauss;
   sim = new Sim(RAPIER, { seed: 9 });
   recorder = new ReplayRecorder();
@@ -989,11 +1322,76 @@ async function boot() {
   audio = new AudioEngine();
   world = new World(canvas);
   await world.init((done, total) => { $('loading-n').textContent = t('loading.assets', { done, total }); });
+
+  coins = new CoinManager({
+    audio,
+    onBalanceChange: (val) => {
+      const el = $('coin-val');
+      if (el) {
+        el.textContent = val;
+        const hud = $('hud-coins');
+        hud?.classList.add('pop');
+        setTimeout(() => hud?.classList.remove('pop'), 200);
+      }
+    },
+    onPickup: (p) => {
+      toast(t('coins.picked', { n: p.value }), 1400);
+    },
+  });
+  chips = coins.asChips();
+  if ($('coin-val')) $('coin-val').textContent = coins.balance;
+
+  chessMini = new ChessMini({
+    world,
+    coins,
+    onLeave: () => leaveMini(),
+  });
+
+  avatars = new AvatarManager(world.scene);
+
+  net = new Network({
+    onConnected: ({ roomCode }) => {
+      toast(t('net.connected', { id: roomCode }), 2400);
+      updateNetUI();
+      const url = new URL(location.href);
+      url.searchParams.set('room', roomCode);
+      history.replaceState(null, '', url.toString());
+    },
+    onPlayerJoin: ({ id, name, color }) => {
+      avatars.addPlayer({ id, name, color });
+      toast(t('net.playerJoined', { name: name || id }), 2000);
+      updateNetUI();
+    },
+    onPlayerState: (st) => {
+      avatars.updatePlayerState(st);
+    },
+    onPlayerLeave: ({ id }) => {
+      avatars.removePlayer(id);
+      updateNetUI();
+    },
+    onChat: ({ id, name, text, isMe }) => {
+      avatars.showChat(id, text);
+      if (!isMe) audio.play('ui');
+    },
+    onPoolShot: (p) => {
+      doShoot({ ...p, _fromNet: true });
+    },
+    onPoolPlace: ({ x, z }) => {
+      sim.placeCue(x, z);
+    },
+  });
+
+  if (q.has('room')) {
+    const code = q.get('room');
+    if ($('net-code-input')) $('net-code-input').value = code;
+    net.joinRoom(code).catch(() => {});
+  }
+
   games.dice = createPokerDice({ THREE, RAPIER, world, audio, chips, saveChips, toast, unlock, t, $ });
   applySettings();
   applyMode(true);
   G.aim.angle = 0;
-  $('loading').hidden = true; $('btn-start').hidden = false; $('start-pick').hidden = G.touch;
+  $('loading').hidden = true; $('btn-start').hidden = false; if ($('btn-customize')) $('btn-customize').hidden = false; $('start-pick').hidden = G.touch;
   requestAnimationFrame(frame);
 
   $('btn-start').onclick = async () => {

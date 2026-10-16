@@ -92,14 +92,16 @@ export function createPokerDice({ THREE, RAPIER, world, audio, chips, saveChips,
   function throwNow(idx) {
     if (!g.tray.throwDice(idx)) return false;
     audio.play('rattle');
+    world?.avatars?.player?.play('dice_roll', { onFinish: () => world?.avatars?.player?.play('sit_idle') });
     [250, 470, 720].forEach((ms) => setTimeout(() => { if (g.tray?.phase === 'rolling') audio.play(ms > 500 ? 'click' : 'thud', { gain: 0.7 }); }, ms));
     return true;
   }
 
   function showdown() {
-    g.state = 'showdown'; g.clock = 0; g.rattleT = 0; g.revealed = false;
+    g.state = 'showdown'; g.clock = 0; g.rattleT = 0; g.revealed = false; g.liftPlayed = false;
     for (let i = 0; i < 5; i++) g.tray.held[i] = false;
     world.setHouseDice({ faces: g.house.faces, lift: 0, shake: 1 });
+    world?.avatars?.dealer?.play('dice_cups_shake');
   }
 
   function finish() {
@@ -111,8 +113,12 @@ export function createPokerDice({ THREE, RAPIER, world, audio, chips, saveChips,
       chips.pay(g.stake + delta);
       msg = t('dice.win', { n: delta }); cls = 'win'; g.streak++; audio.play('cheer');
       if (g.streak >= 3) unlock('diceStreak');
+      world?.avatars?.player?.play('react_win');
+      world?.avatars?.dealer?.play('react_lose');
     } else if (out === 'lose') {
       msg = t('dice.lose', { n: g.stake }); cls = 'lose'; g.streak = 0; audio.play('foul'); delta = -g.stake;
+      world?.avatars?.player?.play('react_lose');
+      world?.avatars?.dealer?.play('react_win');
     } else { chips.pay(g.stake); msg = t('dice.push'); cls = 'push'; }
     let refill = '';
     if (chips.balance < 5) { chips.balance = 50; refill = t('dice.refill'); }
@@ -134,12 +140,20 @@ export function createPokerDice({ THREE, RAPIER, world, audio, chips, saveChips,
     $('dice-ui').hidden = false; $('mini').hidden = true;
     world.setDiceActive(true);
     g.cache = {};
+    if (world?.avatars?.player) {
+      const ppos = world.diceLocal(0, 0, 0.7);
+      world.avatars.player.setPosition(ppos.x, 0, ppos.z);
+      world.avatars.player.setRotation(-Math.PI / 2);
+      world.avatars.player.play('sit_idle');
+    }
     if (g.state === 'bet') reset();
     updateUI();
   };
   g.leave = function leave() {
     $('dice-ui').hidden = true;
     reset(); g.state = 'bet'; world.setDiceActive(false);
+    world?.avatars?.player?.play('idle');
+    world?.avatars?.dealer?.play('sit_idle');
   };
   g.onKey = function onKey(code) {
     const s = g.state;
@@ -181,6 +195,7 @@ export function createPokerDice({ THREE, RAPIER, world, audio, chips, saveChips,
         g.rattleT -= dt; if (g.rattleT <= 0) { audio.play('rattle'); g.rattleT = 0.4; }
         world.setHouseDice({ lift: 0, shake: 1 });
       } else if (g.clock < 2.4) {
+        if (!g.liftPlayed) { g.liftPlayed = true; world?.avatars?.dealer?.play('dice_cups_lift'); }
         const u = (g.clock - 1.6) / 0.8; world.setHouseDice({ lift: u * u * (3 - 2 * u), shake: 0 });
         if (!g.revealed) { g.revealed = true; audio.play('thud'); }
       } else if (g.clock >= 3.0) finish();

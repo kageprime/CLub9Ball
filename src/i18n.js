@@ -30,7 +30,7 @@ const DICT = {
     'key.aim': 'E 瞄准',
     'key.shoot': '空格 出杆',
     'key.replay': 'V 回放',
-    'key.hint.walk': 'WASD 走动 · E 俯身瞄准 · Q 互动',
+    'key.hint.walk': 'WASD 走动 · E 俯身瞄准 · Q 互动 · Tab 切换视角',
     'key.hint.aim': '鼠标 瞄准 · 左键/滚轮 力度 · 空格 出杆 · A/D W/S 加塞 · R 复位',
     'key.hint.place': '移动鼠标摆球 · 左键 确认 · F 取消',
     'key.hint.minigame': 'Q 离开',
@@ -169,6 +169,16 @@ const DICT = {
     'roulette.cash': '兑现 +{n}',
     'roulette.spin': '转轮',
     'roulette.start': '按空格开始（下注 {n}）',
+    'roulette.potLabel': '当前奖池',
+    'roulette.oddsLabel': '安全概率',
+    'roulette.stakeLabel': '下注:',
+    'roulette.pullBtn': '🎯 扣扳机 [空格]',
+    'roulette.pullAgainBtn': '🎯 再次扣动 [空格]',
+    'roulette.spinBtn': '🔄 转轮 [R]',
+    'roulette.cashBtn': '💰 收手兑现 [Enter]',
+    'roulette.leaveBtn': '起身离开 [Q / Esc]',
+    'roulette.readyPrompt': '设置注额，扣动扳机开始试探运气。',
+    'roulette.pullPrompt': '击发安全！奖池已翻倍。继续扣动或收手兑现。',
 
     'ach.title': '成就',
     'ach.unlocked': '成就解锁：{n}',
@@ -238,6 +248,40 @@ const DICT = {
     'over.why.eightFoul': '黑八落袋时犯规',
     'over.why.eightEarly': '提前打进黑八',
     'spectate.label': '观战 · AI 对打',
+
+    // Coins & Economy
+    'hud.coins': '金币',
+    'coins.title': '俱乐部金币',
+    'coins.picked': '+{n} 金币！',
+    'coins.spent': '-{n} 金币',
+    'coins.balance': '金币：{n}',
+    'coins.notEnough': '金币不足！',
+    'coins.drinkBought': '买了一杯啤酒！享受微醺惬意。',
+    'bar.chess': '国际象棋茶座',
+    'bar.drink': '来杯啤酒 (10金币)',
+    'chess.title': '像素国际象棋',
+    'chess.hint': 'Q / ESC：起立离开 · 点击或拖动棋子走棋',
+    'chess.standUp': '起立离开 [Q]',
+    'chess.fullscreen': '全屏',
+    'chess.roomCode': '房间码',
+    'net.btn': '多人联机',
+    'net.title': '多人同游大厅',
+    'net.desc': '与好友在九号俱乐部碰头！一起走动、台球、下象棋、即时聊天。',
+    'net.host': '创建房间',
+    'net.join': '加入房间',
+    'net.codePlaceholder': '输入房间码...',
+    'net.connecting': '正在连接房间 {id}…',
+    'net.connected': '已进入房间：{id}',
+    'net.failed': '连接失败，请检查房间码',
+    'net.copyLink': '复制邀请链接',
+    'net.copied': '邀请链接已复制！',
+    'net.playerJoined': '{name} 来到了俱乐部！',
+    'net.playerLeft': '{name} 离开了俱乐部。',
+    'net.chatHint': '按 Enter 打字聊天',
+    'net.chatPlaceholder': '在俱乐部说点什么...',
+    'net.send': '发送',
+    'net.online': '{n} 人在线',
+    'net.leave': '离开房间',
   },
   en: {
     'app.title': 'Club No.9',
@@ -268,7 +312,7 @@ const DICT = {
     'key.aim': 'E: AIM',
     'key.shoot': 'SPACE: SHOOT',
     'key.replay': 'V: REPLAY',
-    'key.hint.walk': 'WASD walk · E lean in to aim · Q interact',
+    'key.hint.walk': 'WASD walk · E lean in to aim · Q interact · Tab 1P/3P',
     'key.hint.aim': 'Mouse aim · LMB/wheel power · Space shoot · A/D W/S spin · R reset',
     'key.hint.place': 'Move mouse to place · LMB confirm · F cancel',
     'key.hint.minigame': 'Q to leave',
@@ -407,6 +451,16 @@ const DICT = {
     'roulette.cash': 'Cashed out +{n}',
     'roulette.spin': 'Spin',
     'roulette.start': 'Press Space to start (stake {n})',
+    'roulette.potLabel': 'Current Pot',
+    'roulette.oddsLabel': 'Safe Odds',
+    'roulette.stakeLabel': 'Stake:',
+    'roulette.pullBtn': '🎯 Pull Trigger [Space]',
+    'roulette.pullAgainBtn': '🎯 Pull Again [Space]',
+    'roulette.spinBtn': '🔄 Spin [R]',
+    'roulette.cashBtn': '💰 Cash Out [Enter]',
+    'roulette.leaveBtn': 'Stand Up [Q / Esc]',
+    'roulette.readyPrompt': 'Place your stake and pull trigger to test your luck.',
+    'roulette.pullPrompt': 'Chamber empty! Pot multiplied. Pull again or cash out.',
 
     'ach.title': 'Achievements',
     'ach.unlocked': 'Unlocked: {n}',
@@ -476,10 +530,44 @@ const DICT = {
     'over.why.eightFoul': 'Fouled while potting the 8',
     'over.why.eightEarly': 'Potted the 8 too early',
     'spectate.label': 'Spectating · AI match',
+
+    // Coins & Economy
+    'hud.coins': 'Coins',
+    'coins.title': 'Club Coins',
+    'coins.picked': '+{n} Coins!',
+    'coins.spent': '-{n} Coins',
+    'coins.balance': 'Coins: {n}',
+    'coins.notEnough': 'Not enough coins!',
+    'coins.drinkBought': 'Cold pint ordered! Enjoy the club vibe.',
+    'bar.chess': 'Chess Lounge',
+    'bar.drink': 'Order Pint (10 Coins)',
+    'chess.title': 'Pixel Chess Lounge',
+    'chess.hint': 'Q / ESC: Stand Up · Tap or Drag Pieces to Move',
+    'chess.standUp': 'Stand Up [Q]',
+    'chess.fullscreen': 'Fullscreen',
+    'chess.roomCode': 'Room Code',
+    'net.btn': 'Multiplayer',
+    'net.title': 'Multiplayer Hangout',
+    'net.desc': 'Hang out with friends in Club No.9! Play pool, chess, and chat in real-time.',
+    'net.host': 'Create Room',
+    'net.join': 'Join Room',
+    'net.codePlaceholder': 'Enter Room Code...',
+    'net.connecting': 'Connecting to room {id}…',
+    'net.connected': 'Connected to Room: {id}',
+    'net.failed': 'Connection failed. Check room code.',
+    'net.copyLink': 'Copy Invite Link',
+    'net.copied': 'Invite link copied!',
+    'net.playerJoined': '{name} entered the club!',
+    'net.playerLeft': '{name} left the club.',
+    'net.chatHint': 'Press Enter to Chat',
+    'net.chatPlaceholder': 'Say something...',
+    'net.send': 'Send',
+    'net.online': '{n} Online',
+    'net.leave': 'Leave Room',
   },
 };
 
-let lang = 'zh';
+let lang = 'en';
 const listeners = new Set();
 
 export const LANGS = Object.keys(DICT);
@@ -493,12 +581,16 @@ export function setLang(l) {
   for (const f of listeners) f(l);
 }
 export function initLang() {
-  let l = 'zh';
+  let l = 'en';
   try {
-    const nav = (typeof navigator !== 'undefined' ? navigator.language || '' : 'zh').toLowerCase();
-    l = nav.startsWith('zh') ? 'zh' : 'en';
     const saved = localStorage.getItem('club9.lang');
     if (saved && DICT[saved]) l = saved;
+    else {
+      // Default to English as primary, unless browser is explicitly Chinese
+      const nav = (typeof navigator !== 'undefined' ? navigator.language || '' : 'en').toLowerCase();
+      if (nav.startsWith('zh-cn') || nav.startsWith('zh-hans')) l = 'zh';
+      else l = 'en';
+    }
   } catch (_) { /* 隐私模式：用默认 */ }
   lang = l;
   setLang(l);
@@ -506,7 +598,7 @@ export function initLang() {
 export function onLang(f) { listeners.add(f); return () => listeners.delete(f); }
 
 export function t(key, params) {
-  let s = DICT[lang][key] ?? DICT.zh[key] ?? key;
+  let s = DICT[lang][key] ?? DICT.en[key] ?? DICT.zh[key] ?? key;
   if (params) s = s.replace(/\{(\w+)\}/g, (_, k) => (params[k] !== undefined ? params[k] : `{${k}}`));
   return s;
 }

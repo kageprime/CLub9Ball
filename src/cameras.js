@@ -12,7 +12,7 @@
 
 import * as THREE from 'three';
 
-export const CAMS = ['auto', 'behind', 'top', 'broadcast', 'side', 'orbit', 'chase'];
+export const CAMS = ['auto', 'behind', 'top', 'broadcast', 'side', 'orbit', 'chase', 'thirdPerson'];
 const V3 = THREE.Vector3;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
@@ -93,6 +93,16 @@ export class CameraRig {
           look = new V3(c.x + cd.x * 0.45, Y + 0.02, c.z + cd.z * 0.45); fov = 60; k = 7;
         }
         break;
+      case 'thirdPerson': {
+        // 第三人称：跟在玩家身后上方
+        const p = ctx.player || { x: 0, z: 0, yaw: 0 };
+        const camDist = 2.2, camH = 1.9;
+        const ox = -Math.cos(p.yaw) * camDist, oz = -Math.sin(p.yaw) * camDist;
+        pos = new V3(p.x + ox, camH, p.z + oz);
+        look = new V3(p.x, 1.4, p.z);
+        fov = 58; k = 12; lamps = true;
+        break;
+      }
       default:
         pos = new V3(0, Y + 1.2, 2); look = new V3(0, Y, 0);
     }
@@ -100,4 +110,4 @@ export class CameraRig {
   }
 }
 
-export const CAM_KEYS = { Digit1: 'auto', Digit2: 'behind', Digit3: 'top', Digit4: 'broadcast', Digit5: 'side', Digit6: 'orbit', Digit7: 'chase' };
+export const CAM_KEYS = { Digit1: 'auto', Digit2: 'behind', Digit3: 'top', Digit4: 'broadcast', Digit5: 'side', Digit6: 'orbit', Digit7: 'chase', Digit8: 'thirdPerson' };
