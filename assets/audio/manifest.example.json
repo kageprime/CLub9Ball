@@ -1,0 +1,11 @@
+{
+  "_说明": "复制为 assets/audio/manifest.json 后生效。每类可以是文件名，或 {file,start,dur,gain} 切片（一个长文件切出多个变体，随机播放）。",
+  "hit":     [{ "file": "balls.ogg", "start": 0.00, "dur": 0.25 }, { "file": "balls.ogg", "start": 1.10, "dur": 0.25 }],
+  "cushion": [{ "file": "balls.ogg", "start": 2.40, "dur": 0.35 }],
+  "pocket":  ["pocket1.ogg", "pocket2.ogg"],
+  "break":   ["break.ogg"],
+  "cue":     ["cue1.ogg"],
+  "place":   ["place.ogg"],
+  "cheer":   ["cheer.ogg"],
+  "bgm": "bgm.mp3"
+}

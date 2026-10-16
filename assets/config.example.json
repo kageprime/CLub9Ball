@@ -1,0 +1,19 @@
+{
+  "_说明": "复制为 assets/config.json 后生效。所有字段可选。",
+  "bar": {
+    "url": "assets/models/bar_diorama.glb",
+    "autoFit": true,
+    "hideRegex": "(pool|billiard|snooker)",
+    "hide": [],
+    "scale": null,
+    "rotY": 0,
+    "offset": [0, 0, 0]
+  },
+  "textures": { "walnut": "assets/textures/walnut_diff.jpg" },
+  "hdri": "assets/hdri/fireplace_1k.hdr",
+  "props": {
+    "darts":    { "pos": [4.19, 1.73, 1.6] },
+    "dice":     { "pos": [2.9, 0, -1.9] },
+    "roulette": { "pos": [-1.6, 1.115, -2.7] }
+  }
+}

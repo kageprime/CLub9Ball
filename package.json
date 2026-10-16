@@ -1,0 +1,13 @@
+{
+  "name": "club-no9",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "@dimforge/rapier3d-compat": "0.14.0",
+    "three": "^0.170.0"
+  }
+}

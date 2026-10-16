@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>九号俱乐部 CLUB No.9</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap">
+<link rel="stylesheet" href="style.css">
+
+<!-- import map：Three.js 与 Rapier 走 CDN（固定版本）。想完全离线，把这两个包下载到 vendor/ 并改这里的路径即可。 -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+    "@dimforge/rapier3d-compat": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.14.0/rapier.es.js"
+  }
+}
+</script>
+</head>
+<body>
+<script>
+  // 直接双击打开 (file://) 时，浏览器会拦截 ES 模块；给出明确提示而不是白屏
+  if (location.protocol === 'file:') {
+    document.addEventListener('DOMContentLoaded', function () {
+      var l = document.getElementById('loading');
+      l.innerHTML = '请不要直接双击 index.html（浏览器禁止 file:// 加载模块）。<br><br>Windows：双击同目录的 <b>start.bat</b>，会自动打开 http://localhost:8000<br>其它系统：在此目录运行 <b>node serve.mjs</b> 或 <b>python3 -m http.server 8000</b>，再访问 http://localhost:8000';
+      l.style.cssText = 'color:#ffb84a;line-height:2;text-align:center;max-width:80vw;font-size:13px';
+    });
+  }
+</script>
+<canvas id="gl"></canvas>
+
+<!-- HUD -->
+<div id="hud" hidden>
+  <div class="panel player" id="hud-p1">
+    <div class="row"><span class="pname" id="p1-name"></span><span class="pgroup" id="p1-group"></span></div>
+    <div class="balls" id="p1-balls"></div>
+    <div class="combo" id="p1-combo"></div>
+  </div>
+  <div class="panel player" id="hud-p2">
+    <div class="row"><span class="pname" id="p2-name"></span><span class="pgroup" id="p2-group"></span></div>
+    <div class="balls" id="p2-balls"></div>
+    <div class="combo" id="p2-combo"></div>
+  </div>
+  <button class="panel btn hud-btn" id="btn-free"><span data-i18n="hud.freeBall"></span> / <span class="alt" id="alt-free"></span></button>
+  <button class="panel btn hud-btn" id="btn-settings"><span data-i18n="hud.settings"></span> / <span class="alt" id="alt-settings"></span></button>
+  <div class="panel mode" id="mode-label"></div>
+  <div id="turnbar" class="panel"><span id="turn-text"></span></div>
+  <div id="cambar"><span class="cam-t" data-i18n="cam.title"></span><div id="cam-chips"></div></div>
+
+  <div id="power"><div class="lbl"><span data-i18n="hud.power"></span></div><div class="bar" id="power-bar"></div></div>
+  <div id="keys">
+    <div id="keyhint"></div>
+    <div id="keymisc" data-i18n="key.misc"></div>
+  </div>
+  <canvas id="spin" width="48" height="48" title="A/D W/S"></canvas>
+  <div id="badges"></div>
+  <div id="spectate" hidden data-i18n="spectate.label"></div>
+</div>
+
+<div id="msg" class="panel" hidden></div>
+<div id="prompt" class="panel" hidden></div>
+<div id="achtoast" class="panel" hidden></div>
+<div id="reticle" hidden></div>
+
+<!-- 小游戏面板 -->
+<div id="mini" class="panel" hidden>
+  <div id="mini-title"></div>
+  <div id="mini-lines"></div>
+  <div id="mini-hint"></div>
+</div>
+
+<!-- 骰子扑克 -->
+<div id="dice-ui" hidden>
+  <div id="dice-chips" class="panel"></div>
+  <div id="dice-tags"><div class="dtag" hidden></div><div class="dtag" hidden></div><div class="dtag" hidden></div><div class="dtag" hidden></div><div class="dtag" hidden></div></div>
+  <div id="dice-houselabel" class="dlabel" hidden></div>
+  <div id="dice-hand" class="panel"></div>
+  <div id="dice-hint"></div>
+  <div id="dice-result" class="panel" hidden></div>
+  <div id="dice-ranks" class="panel" hidden></div>
+</div>
+
+<!-- 回放 -->
+<div id="replay" class="panel" hidden>
+  <div class="replay-head"><span data-i18n="replay.title"></span> <span id="replay-time"></span></div>
+  <div class="replay-row">
+    <button class="btn small" id="rp-play"></button>
+    <input type="range" id="rp-seek" min="0" max="1000" value="0" step="1">
+  </div>
+  <div class="replay-row">
+    <span data-i18n="replay.speed"></span>
+    <input type="range" id="rp-speed" min="0.1" max="1" step="0.05" value="1">
+    <span id="rp-speed-val">1.0×</span>
+    <button class="btn small" id="rp-close" data-i18n="replay.close"></button>
+  </div>
+</div>
+
+<!-- 开始 / 加载 -->
+<div id="start" class="overlay">
+  <div class="sign">
+    <div class="cn" data-i18n="app.title"></div>
+    <div class="en">CLUB No.9</div>
+  </div>
+  <div id="loading"><span data-i18n="loading"></span> <span id="loading-n"></span></div>
+  <div id="start-pick" hidden>
+    <div class="modes" data-modes></div>
+    <div class="diffrow" data-diffs></div>
+  </div>
+  <button class="btn big" id="btn-start" hidden data-i18n="start.click"></button>
+  <div class="sub" data-i18n="start.sub"></div>
+  <div class="sub warn" id="start-touch" hidden data-i18n="start.spectate"></div>
+  <div class="langrow"><button class="btn small" data-lang="zh">中文</button><button class="btn small" data-lang="en">EN</button></div>
+</div>
+
+<!-- 暂停 -->
+<div id="pause" class="overlay" hidden>
+  <div class="panel menu">
+    <button class="btn big" id="pz-resume" data-i18n="start.click"></button>
+    <div class="pz-label" data-i18n="pause.mode"></div>
+    <div class="modes compact" data-modes></div>
+    <div class="diffrow" data-diffs></div>
+    <button class="btn" id="pz-settings" data-i18n="hud.settings"></button>
+    <button class="btn" id="pz-about" data-i18n="settings.about"></button>
+  </div>
+</div>
+
+<!-- 终局 -->
+<div id="over" class="overlay" hidden>
+  <div class="panel over-card">
+    <div id="over-title"></div>
+    <div id="over-why"></div>
+    <table id="over-stats"></table>
+    <div class="over-btns">
+      <button class="btn big" id="over-rematch" data-i18n="over.rematch"></button>
+      <button class="btn" id="over-menu" data-i18n="over.menu"></button>
+    </div>
+  </div>
+</div>
+
+<!-- 设置 -->
+<div id="settings" class="overlay" hidden>
+  <div class="panel dialog">
+    <h2 data-i18n="settings.title"></h2>
+    <div class="field"><span data-i18n="settings.language"></span>
+      <span><button class="btn small" data-lang="zh">中文</button> <button class="btn small" data-lang="en">English</button></span></div>
+    <label class="field"><span data-i18n="settings.closeup"></span><input type="checkbox" id="set-closeup"></label>
+    <label class="field"><span data-i18n="settings.aimline"></span><input type="checkbox" id="set-aim"></label>
+    <label class="field"><span data-i18n="settings.sound"></span><input type="range" id="set-vol" min="0" max="1" step="0.05"></label>
+    <label class="field"><span data-i18n="settings.pixel"></span>
+      <select id="set-pixel"><option value="180">180p</option><option value="270">270p</option><option value="360">360p</option><option value="540">540p</option></select></label>
+    <h3 data-i18n="ach.title"></h3>
+    <div id="ach-list"></div>
+    <div class="field">
+      <button class="btn small" id="set-reset" data-i18n="settings.reset"></button>
+      <button class="btn small" id="set-about" data-i18n="settings.about"></button>
+      <button class="btn small" id="set-close" data-i18n="settings.close"></button>
+    </div>
+  </div>
+</div>
+
+<!-- 关于 · 开源材质与许可 -->
+<div id="about" class="overlay" hidden>
+  <div class="panel dialog wide">
+    <h2 data-i18n="about.title"></h2>
+    <p data-i18n="about.intro"></p>
+    <table id="about-table">
+      <tbody>
+        <tr><td data-i18n="about.three"></td><td></td></tr>
+        <tr><td data-i18n="about.rapier"></td><td></td></tr>
+        <tr><td data-i18n="about.bar"></td><td data-status="bar"></td></tr>
+        <tr><td data-i18n="about.walnut"></td><td data-status="walnut"></td></tr>
+        <tr><td data-i18n="about.hdri"></td><td data-status="hdri"></td></tr>
+        <tr><td data-i18n="about.sfx"></td><td data-status="sfx"></td></tr>
+        <tr><td data-i18n="about.bgm"></td><td data-status="bgm"></td></tr>
+      </tbody>
+    </table>
+    <p data-i18n="about.proc"></p>
+    <div class="field"><button class="btn small" id="about-close" data-i18n="about.close"></button></div>
+  </div>
+</div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
