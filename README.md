@@ -12,6 +12,15 @@ node serve.mjs                  # 零依赖静态服务器，然后打开 http:/
 # 也可用 python3 -m http.server 8000。⚠ 不能双击 index.html（file:// 下浏览器禁止加载 ES 模块）
 ```
 
+## 部署（Vercel）
+
+纯静态、无构建步骤，无需环境变量：Three.js / Rapier 走 CDN，根目录直接作为静态输出。`vercel.json` 已声明框架预设 "Other"、跳过安装与构建、输出目录为根目录。
+
+- 推荐：在 [vercel.com/new](https://vercel.com/new) 导入本仓库并 Deploy；之后每次 `git push` 自动重新部署。
+- 或者用 CLI：`npx vercel login` 后执行 `npx vercel --prod`。
+
+之后把真实素材（模型 / 音频 / HDRI）放进 `assets/` 并提交，会随静态部署直接生效；缺失时游戏照用程序化兜底。
+
 ## 对局模式（开始画面 / 暂停菜单里切换）
 
 | 模式 | 说明 |
