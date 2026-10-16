@@ -42,10 +42,11 @@ export function createPokerDice({ THREE, RAPIER, world, audio, chips, saveChips,
     $('dice-ranks').hidden = !g.showRanks;
   }
 
-  // 标签跟着骰子走（投影到屏幕）
+  // 标签跟着骰子走（投影到屏幕；画布居中且整数倍放大，用画布矩形换算）
   function placeTags() {
     const cam = world.camera;
-    const proj = (x, y, z) => { const v = world.diceLocal(x, y, z).project(cam); return { x: (v.x * 0.5 + 0.5) * innerWidth, y: (-v.y * 0.5 + 0.5) * innerHeight, ok: v.z < 1 }; };
+    const rct = world.canvas.getBoundingClientRect();
+    const proj = (x, y, z) => { const v = world.diceLocal(x, y, z).project(cam); return { x: rct.left + (v.x * 0.5 + 0.5) * rct.width, y: rct.top + (-v.y * 0.5 + 0.5) * rct.height, ok: v.z < 1 }; };
     const tags = $('dice-tags').children;
     const showHold = g.state === 'hold' && g.tray;
     for (let i = 0; i < 5; i++) {

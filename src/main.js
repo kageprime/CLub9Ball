@@ -43,7 +43,7 @@ const G = {
   player: { x: -2.3, z: 0, yaw: 0, pitch: -0.15 },
   aim: { angle: 0, power: 0.5, sx: 0, sy: 0, charging: false },
   cursor: { x: 0, y: 0 },  // 虚拟光标（NDC），自由球与飞镖用
-  settings: { closeup: true, aimline: true, volume: 0.8, pixel: 270, mode: 'cpu', diff: 'normal', cam: 'auto', ...store.get('settings', {}) },
+  settings: { closeup: true, aimline: true, volume: 0.8, pixel: 360, mode: 'cpu', diff: 'normal', cam: 'auto', ...store.get('settings', {}) },
   achieved: new Set(store.get('ach', [])),
   match: null, potted: [[], []], stats: null,
   lastShot: null, replay: null, closeup: null, rollCam: null,
@@ -52,6 +52,12 @@ const G = {
   camAngle: 0, lastCue: null, cueVel: { x: 0, z: 0 }, dt: 0.016, lamps: true, lastTurn: -1,
 };
 window.__club9 = G; // 调试用（G.games 在文件后面挂上）
+
+// 内部渲染分辨率默认 270p → 360p：旧存档里的 270 多数只是旧默认值，做一次性迁移（可在设置里改回）
+if (!store.get('px360')) {
+  if (G.settings.pixel === 270) { G.settings.pixel = 360; saveSettings(); }
+  store.set('px360', true);
+}
 const rig = new CameraRig(TABLE_Y);
 rig.set(G.settings.cam);
 
@@ -388,6 +394,24 @@ function rematch() {
   if (!G.spectate) lock();
 }
 
+// 结束当前对局，回到主菜单（暂停菜单“结束对局”）
+function quitToMenu() {
+  if (G.mode === 'darts' || G.mode === 'dice' || G.mode === 'roulette') leaveMini();
+  clearTimeout(G.endTimer);
+  G.started = false; G.paused = false; G.replay = null; G.mode = 'walk';
+  G.keys.clear(); G.aim.charging = false;
+  showPause(false);
+  $('over').hidden = true; $('replay').hidden = true; $('prompt').hidden = true;
+  document.exitPointerLock?.();
+  document.body.classList.remove('free', 'in-mini', 'spectating');
+  world.setCue({ visible: false }); world.setAimLine(null);
+  setReticle(false); G.closeup = null;
+  sim.rerack();
+  $('hud').hidden = true;
+  $('start').hidden = false; $('loading').hidden = true; $('btn-start').hidden = false; $('start-pick').hidden = G.touch;
+  renderPickers();
+}
+
 // ---------------------------------------------------------------- 自由球
 function enterPlace(auto = false) {
   if (G.mode === 'rolling' || G.mode === 'striking') return;
@@ -465,7 +489,8 @@ function updatePlace() {
     ghost.visible = true; ghost.position.set(clamp(pt.x, -HALF_L + BALL_R, HALF_L - BALL_R), BALL_R, clamp(pt.z, -HALF_W + BALL_R, HALF_W - BALL_R));
   }
   const v = new THREE.Vector3(pt ? pt.x : 0, TABLE_Y + BALL_R, pt ? pt.z : 0).project(world.camera);
-  setReticle(true, (v.x * 0.5 + 0.5) * innerWidth, (-v.y * 0.5 + 0.5) * innerHeight);
+  const rct = canvas.getBoundingClientRect();   // 画布居中且整数倍放大，准星换算到画布坐标系
+  setReticle(true, rct.left + (v.x * 0.5 + 0.5) * rct.width, rct.top + (-v.y * 0.5 + 0.5) * rct.height);
 }
 function setReticle(on, x = 0, y = 0, ghost = false) {
   const r = $('reticle'); r.hidden = !on; if (!on) return;
@@ -491,7 +516,7 @@ function exitReplay() {
   if (G.mode === 'rolling') G.mode = 'aim';
   sim.snapshotInto(snapBuf); world.syncBalls(snapBuf, 0);
   setTimeout(() => { if (!document.pointerLockElement && !G.spectate) lock(); }, 0);
-  setTimeout(() => { if (!document.pointerLockElement && !G.spectate && G.started) showPause(true); }, 400);
+  setTimeout(() => { if (!document.pointerLockElement && !G.spectate && G.started && lockTries === 0) showPause(true); }, 400);
 }
 function updateReplayUI() {
   const r = G.replay; if (!r) return;
@@ -626,7 +651,8 @@ const games = {
         }
       }
       const sw = this.sway(), wp = world.dartToWorld(this.aim.x + sw.x, this.aim.y + sw.y).project(world.camera);
-      setReticle(true, (wp.x * 0.5 + 0.5) * innerWidth, (-wp.y * 0.5 + 0.5) * innerHeight);
+      const rct = canvas.getBoundingClientRect();   // 画布居中且整数倍放大，准星要按画布矩形换算
+      setReticle(true, rct.left + (wp.x * 0.5 + 0.5) * rct.width, rct.top + (-wp.y * 0.5 + 0.5) * rct.height);
       const g = this.game;
       mini.show(t('darts.title'), [t('darts.round', { s: g.roundSoFar() }), t('darts.total', { s: g.total }), g.round.map((d) => d.score).join(' · ') || '—', this.lastText], t('darts.hint'));
     },
@@ -692,13 +718,36 @@ G.games = games; G.startTurn = () => startTurn(); G.showOver = showOver;
 
 // ---------------------------------------------------------------- 输入
 const canvas = $('gl');
-function lock() { try { const p = canvas.requestPointerLock?.(); p?.catch?.(() => {}); } catch (_) { /* 忽略 */ } }
+// 指针锁重试：Chromium 在按 Esc 退出锁后 ~1.25 s 内会拒绝再次加锁（chromium issue 40148473），
+// 静默失败会让玩家卡在“没有锁、又打不开暂停菜单”的状态，所以失败要自动重试。
+let lockTries = 0, lockTimer = 0;
+function lock() {
+  if (!G.started || G.spectate || document.pointerLockElement === canvas) return;
+  clearTimeout(lockTimer); lockTries = 0;
+  const attempt = () => {
+    if (document.pointerLockElement === canvas || !G.started || G.spectate || G.paused) return;
+    lockTries++;
+    try { const p = canvas.requestPointerLock?.(); p?.catch?.(() => {}); } catch (_) { /* 忽略 */ }
+    lockTimer = setTimeout(() => {
+      if (document.pointerLockElement === canvas) return;
+      if (lockTries < 3) attempt();
+      else if (!G.paused && !anyDialog()) showPause(true);   // 实在锁不上：把暂停菜单还给玩家
+    }, 1400);
+  };
+  attempt();
+}
+function resumeGame() {
+  if (G.spectate) { showPause(false); return; }
+  showPause(false);
+  lock();
+}
 function showPause(on) {
   G.paused = on; $('pause').hidden = !on; document.body.classList.toggle('free', on || G.mode === 'replay' || G.spectate);
 }
 
 document.addEventListener('pointerlockchange', () => {
   const locked = document.pointerLockElement === canvas;
+  if (locked) { clearTimeout(lockTimer); lockTries = 0; }
   document.body.classList.toggle('free', !locked || G.spectate);
   if (!G.started || G.spectate) return;
   if (!locked && G.mode !== 'replay' && !anyDialog()) showPause(true);
@@ -720,7 +769,10 @@ document.addEventListener('mousemove', (e) => {
 });
 document.addEventListener('mousedown', (e) => {
   if (!G.started || G.paused || e.button !== 0) return;
-  if (document.pointerLockElement !== canvas) return;
+  if (document.pointerLockElement !== canvas) {
+    if (e.target === canvas && !G.spectate && !anyDialog()) lock();   // 失去指针锁后，点画面即可重新接管鼠标
+    return;
+  }
   if (G.mode === 'aim') { G.aim.charging = true; }
   else if (G.mode === 'place') confirmPlace();
   else if (G.mode === 'darts') games.darts.onClick();
@@ -735,6 +787,10 @@ document.addEventListener('keydown', (e) => {
   const c = e.code;
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(c)) e.preventDefault();
   if (c === 'KeyM') { const m = audio.toggleMute(); toast(t(m ? 'msg.muted' : 'msg.unmuted'), 1000); return; }
+  if (c === 'Escape' && G.mode !== 'replay') {
+    if (G.paused) { resumeGame(); return; }                                  // Esc 再按一次 = 继续
+    if (document.pointerLockElement !== canvas) { showPause(true); return; } // 没有指针锁时（含观战）随时可暂停
+  }
   if (G.paused) return;
   G.keys.add(c);
   if (!$('over').hidden) { if (c === 'Enter') rematch(); return; }
@@ -793,6 +849,7 @@ function renderPickers() {
   });
 }
 function applyMode(restart) {
+  if (G.mode === 'darts' || G.mode === 'dice' || G.mode === 'roulette') leaveMini();   // 从小游戏切模式时先收尾
   const id = G.settings.mode;
   G.spectate = G.touch || id === 'watch';
   G.opp = id === 'cpu' ? 'cpu' : 'human';
@@ -805,7 +862,7 @@ document.addEventListener('click', (e) => {
   const mc = e.target.closest('[data-mode]');
   if (mc) {
     G.settings.mode = mc.dataset.mode; saveSettings();
-    if (G.started) { applyMode(true); showPause(false); if (!G.spectate) lock(); } else applyMode(false);
+    if (G.started) { applyMode(true); resumeGame(); } else applyMode(false);
     return;
   }
   const dc = e.target.closest('[data-diff]');
@@ -834,10 +891,11 @@ function closePanel(id) { $(id).hidden = true; if (!anyDialog()) { if (G.started
 
 function bindUI() {
   $('btn-settings').onclick = () => openPanel('settings');
-  $('btn-free').onclick = () => { if (G.spectate || G.mode === 'cpu') return; if (G.paused) { showPause(false); lock(); } if (G.mode === 'aim' || G.mode === 'walk') enterPlace(); };
-  $('pz-resume').onclick = () => { showPause(false); lock(); };
+  $('btn-free').onclick = () => { if (G.spectate || G.mode === 'cpu') return; if (G.paused) resumeGame(); if (G.mode === 'aim' || G.mode === 'walk') enterPlace(); };
+  $('pz-resume').onclick = () => resumeGame();
   $('pz-settings').onclick = () => openPanel('settings');
   $('pz-about').onclick = () => openPanel('about');
+  $('pz-quit').onclick = () => quitToMenu();
   $('set-close').onclick = () => closePanel('settings');
   $('set-about').onclick = () => { $('settings').hidden = true; openPanel('about'); };
   $('about-close').onclick = () => closePanel('about');

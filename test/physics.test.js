@@ -186,14 +186,44 @@ test('物理：直线正碰，目标球获得大部分动量，母球近乎停�
   sim._spawn(0, -0.5, 0);
   sim._spawn(1, 0.3, 0);
   sim.strike({ angle: 0, power: 0.5, spinY: 0 });
-  sim.runUntilStill(30);
-  const c = sim.ballPos(0), o = sim.ballPos(1);
-  // 1 号球沿 +x 走远
-  assert.ok(o && o.x > 0.5, `1 号球应向前滚动：${JSON.stringify(o)}`);
-  assert.ok(Math.abs(o.z) < 0.02, '正碰不应偏离 x 轴');
-  // 母球落点显著短于目标球
-  assert.ok(!c || c.x < o.x - 0.2, '母球应显著落后于目标球');
+  // 在“首次碰球后 0.1 s”量速度：目标球随后会撞库回弹（真实物理），不能等全停再按位置断言
+  let hit = false, vCue = -1, vObj = -1, maxObjX = 0.3;
+  for (let i = 0; i < 240 * 8; i++) {
+    sim._step();
+    const o = sim.ballPos(1);
+    if (o) maxObjX = Math.max(maxObjX, o.x);
+    if (!hit && sim.balls[1]) {
+      const vo = sim.balls[1].linvel();
+      if (Math.hypot(vo.x, vo.z) > 0.2) {
+        hit = true;
+        for (let k = 0; k < 24; k++) sim._step();   // 让碰撞完成分离
+        const vc = sim.balls[0] ? sim.balls[0].linvel() : { x: 0, z: 0 };
+        const vo2 = sim.balls[1].linvel();
+        vCue = Math.hypot(vc.x, vc.z); vObj = Math.hypot(vo2.x, vo2.z);
+      }
+    } else if (hit && sim.phase === 'idle') break;
+  }
+  assert.ok(hit, '应发生碰撞');
+  assert.ok(vObj > 1.5, `目标球碰后应获得大部分动量：${vObj.toFixed(3)} m/s`);
+  assert.ok(vCue < 0.5, `母球应近乎停住：${vCue.toFixed(3)} m/s`);
+  assert.ok(vObj > vCue * 3, '目标球速度应显著大于母球');
+  assert.ok(maxObjX > 1.0, `1 号球应滚过大部分台面：最远 x=${maxObjX.toFixed(3)}`);
   sim.dispose();
+});
+
+test('物理：力度→杆速为二次映射（半力≈中等杆速，满力=开球速度）', needRapier, () => {
+  const speedAt = (power) => {
+    const sim = new Sim(RAPIER, { seed: 2 });
+    for (let n = 1; n < 16; n++) sim._remove(n);
+    sim._spawn(0, -0.5, 0);
+    assert.ok(sim.strike({ angle: 0, power }));
+    const v = sim.balls[0].linvel();
+    sim.dispose();
+    return Math.hypot(v.x, v.z);
+  };
+  const vHalf = speedAt(0.5), vFull = speedAt(1);
+  assert.ok(vHalf > 2.4 && vHalf < 3.1, `半力杆速应在中等区间：${vHalf.toFixed(3)} m/s`);
+  assert.ok(vFull > 9.5 && vFull < 10.5, `满力应到开球杆速：${vFull.toFixed(3)} m/s`);
 });
 
 test('物理：低杆（拉杆）让母球碰后回退，高杆（推杆）让母球前进', needRapier, () => {

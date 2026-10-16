@@ -268,7 +268,9 @@ export class Sim {
     const cue = this.balls[0];
     if (!cue || this.phase !== 'idle') return false;
     const p = Math.max(0, Math.min(1, power));
-    const speed = PHYS.minCueSpeed + (PHYS.maxCueSpeed - PHYS.minCueSpeed) * p;
+    // 杆速与力度为二次关系：中等力度≈真实中等杆速（半力约 2.7 m/s，实测 medium/fast 区间），
+    // 只有接近满力才到开球速度（10 m/s）。线性映射会让半力变成“暴力杆”，球显得快得离谱。
+    const speed = PHYS.minCueSpeed + (PHYS.maxCueSpeed - PHYS.minCueSpeed) * p * p;
     const dx = Math.cos(angle), dz = Math.sin(angle);
     // right = d × up = (-dz·0..)：对 d=(dx,0,dz)，up=(0,1,0) → right=(-dz, 0, dx) 的镜像；
     // 用叉积直接算：d × up = (dy*0 - dz*1, dz*0 - dx*0, dx*1 - dy*0) → (-dz, 0, dx)

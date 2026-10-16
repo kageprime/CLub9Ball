@@ -25,7 +25,7 @@ const V3 = THREE.Vector3;
 export class World {
   constructor(canvas) {
     this.canvas = canvas;
-    this.pixelHeight = 270;
+    this.pixelHeight = 360;
     this.status = { bar: 'fallback', walnut: 'fallback', hdri: 'fallback' };
     this.cfg = {};
     this.time = 0;
@@ -124,13 +124,22 @@ export class World {
   setPixelHeight(h) { this.pixelHeight = Math.max(120, Math.min(540, Math.round(h))); this.resize(); }
 
   resize() {
-    const aspect = (window.innerWidth || 16) / Math.max(1, window.innerHeight || 9);
-    const h = this.pixelHeight, w = Math.max(160, Math.round(h * aspect));
+    const vw = Math.max(1, window.innerWidth || 16);
+    const vh = Math.max(1, window.innerHeight || 9);
+    // 整数倍放大：屏幕上的每个“像素”是 N×N 个物理像素，避免非整数拉伸造成的大小不一与抖动。
+    // N 取“内部高度 vh/N 最接近 pixelHeight”的整数倍率（至少 1）。
+    const t = this.pixelHeight;
+    const base = Math.max(1, Math.floor(vh / t));
+    const N = Math.abs(vh / (base + 1) - t) < Math.abs(vh / base - t) ? base + 1 : base;
+    const h = Math.max(120, Math.floor(vh / N));
+    const w = Math.max(160, Math.floor(vw / N));
     this.renderer.setSize(w, h, false);
     this.rt.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
-    this.lowRes = { w, h };
+    this.canvas.style.width = w * N + 'px';
+    this.canvas.style.height = h * N + 'px';
+    this.lowRes = { w, h, scale: N };
   }
 
   // ---------- 材质小工具 ----------
@@ -347,7 +356,7 @@ export class World {
   // ---------- 球 ----------
   _buildBalls() {
     this.balls = [];
-    const geo = new THREE.SphereGeometry(BALL_R, 18, 12);
+    const geo = new THREE.SphereGeometry(BALL_R, 32, 24);
     for (let n = 0; n < 16; n++) {
       const mat = new THREE.MeshStandardMaterial({ map: TX.makeBallTexture(n), roughness: 0.22, metalness: 0.0, envMapIntensity: 1.2 });
       const m = new THREE.Mesh(geo, mat);

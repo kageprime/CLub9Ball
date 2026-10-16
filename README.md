@@ -6,7 +6,7 @@
 
 ```bash
 npm install          # 只为跑测试（Rapier）；游戏本身走 CDN
-npm test             # 61 个用例；装了 Rapier 后物理/骰盅的 10 个用例会从“跳过”变成真跑
+npm test             # 79 个用例（含 Rapier 物理：开球、定杆、拉杆/推杆、杆速映射）
 node serve.mjs                  # 零依赖静态服务器，然后打开 http://localhost:8000
 # Windows：直接双击 start.bat（会自动开服务器并打开浏览器）
 # 也可用 python3 -m http.server 8000。⚠ 不能双击 index.html（file:// 下浏览器禁止加载 ES 模块）
@@ -58,7 +58,7 @@ node serve.mjs                  # 零依赖静态服务器，然后打开 http:/
 | Q | 走近酒吧道具时互动（飞镖 / 骰子扑克 / 左轮），再按 Q 离开 |
 | 1–7 / C | 切换镜头 |
 | M | 静音 |
-| Esc | 暂停菜单（设置、关于） |
+| Esc | 暂停 / 继续；暂停菜单里可切换模式、设置、结束对局回主菜单 |
 
 ## 结构
 
@@ -76,7 +76,7 @@ src/
   dice.js         骰子扑克：牌型 / 比牌 / 庄家策略 + 托盘物理（Rapier）
   pokerdice.js    骰子扑克流程与界面
   cameras.js      七种镜头机位
-  world.js        渲染（只读快照）：低分辨率渲染目标 + 抖动/调色板量化 → 最近邻放大
+  world.js        渲染（只读快照）：低分辨率渲染目标 + 抖动/调色板量化 → 整数倍最近邻放大（像素完美）
   textures.js     Canvas 程序化纹理（mulberry32 确定性）
   audio.js        采样 + 程序化混响 IR + 压限 + BGM
   i18n.js         中/英字典
@@ -92,7 +92,6 @@ Bar Diorama（Sketchfab）的作者与许可请以模型页面为准，使用时
 
 ## 已知局限
 
-- **渲染层与物理层在写入时没有在浏览器 / Rapier 里实际运行过**（开发环境无法访问 npm / CDN）。已通过语法检查、导入导出核对与 61 个 Node 用例（纯逻辑部分），物理手感（摩擦、恢复系数、杆速、袋口几何）需要你本地试打后调参，常量都在 `src/table.js` 的 `MAT` / `PHYS`。
+- 物理常量取自公开实测（Dr. Dave 物理实测表、pooltool `POOL_GENERIC`、Mathavan 库边论文），杆速为力度的二次映射：半力 ≈ 2.7 m/s、满力 10 m/s（开球量级）。常量都在 `src/table.js` 的 `MAT` / `PHYS`；改手感前先核对实测量级，别凭感觉改。
 - 球房 GLB 的“隐藏自带球桌”靠节点/材质名正则匹配（`pool|billiard|snooker`），不同模型命名不同，必要时在 `assets/config.json` 里指定。
-- 测试 `直线正碰…定杆` 在改动前就已失败：半力一杆打出去，目标球只滚了约 9 厘米，说明台呢滚动阻力 / 杆速偏大或偏小，需要在 `src/table.js` 的 `MAT` / `PHYS` 里调手感。
 - 一个“只有一颗子弹”的轮盘：下注/兑现按公平赔率，不是真钱。

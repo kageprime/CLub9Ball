@@ -45,19 +45,21 @@ export function groupOf(n) {
   return n < 8 ? 'solid' : 'stripe';
 }
 
-// 物理材质参数（组合规则取 Min，见 sim.js）
+// 物理材质参数（组合规则取 Min，见 sim.js）。
+// 数值取自公开实测资料：Dr. Dave 物理实测表、pooltool（开源台球模拟器）POOL_GENERIC 预设、
+// Mathavan《库边碰撞》论文。不要凭手感改，改前先查实测区间。
 export const MAT = {
-  ball:    { friction: 0.20, restitution: 0.93 },
-  bed:     { friction: 0.20, restitution: 0.0 },
-  cushion: { friction: 0.12, restitution: 0.72 },
+  ball:    { friction: 0.05, restitution: 0.95 },  // 球-球摩擦实测 0.03–0.08；弹性 0.92–0.98
+  bed:     { friction: 0.20, restitution: 0.0 },   // 呢布滑动摩擦 0.15–0.4（典型 0.2）
+  cushion: { friction: 0.20, restitution: 0.85 },  // 库边摩擦 0.14–0.2；弹性 0.6–0.9（pooltool 0.85）
 };
 
 export const PHYS = {
   dt: 1 / 240,
-  rollDecel: 0.11,          // 滚动阻力（m/s²，恒定减速）
-  spinDecel: 3.0,           // 纵轴自旋衰减（rad/s²）
-  maxCueSpeed: 10.0,        // 满力杆速（m/s）
-  minCueSpeed: 0.35,
+  rollDecel: 0.11,          // 滚动阻力（m/s²）：滚动摩擦 0.005–0.015 → 0.05–0.15
+  spinDecel: 8.0,           // 纵轴自旋衰减（rad/s²）：实测 5–15
+  maxCueSpeed: 10.0,        // 满力杆速（m/s）≈ 开球速度（业余 7–9，职业 11–13）
+  minCueSpeed: 0.30,        // 最轻一推（soft touch < 0.45 m/s）
   sleepSpeed: 0.012,        // 低于此线速度并且角速度小 → 视为静止
   sleepAngSpeed: 0.6,
 };
