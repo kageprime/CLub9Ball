@@ -48,9 +48,10 @@ export const THEMES = {
 
 // 分区灯毯（霓虹主题下显示在分区地面）：台球=桃粉 / 街机=青 / 赌场=紫 / 吧台=琥珀。
 // 尺寸已与房间家具布局对齐：互不重叠、且都在房间内（见 themes 测试）。
+// label 同时用于灯毯地贴文字与分区霓虹吊牌。
 export const ZONES = [
-  { key: 'pool',   x: 0,     z: 0,     w: 3.3, d: 2.0, color: 0xff4fa8 },
-  { key: 'arcade', x: 2.75,  z: 0.55,  w: 2.0, d: 2.9, color: 0x38e0ff },
-  { key: 'casino', x: -2.75, z: 0.15,  w: 2.2, d: 3.6, color: 0xb44fff },
-  { key: 'bar',    x: 0,     z: -2.15, w: 6.8, d: 0.9, color: 0xffb347 },
+  { key: 'pool',   label: 'POOL',   x: 0,     z: 0,     w: 3.3, d: 2.0, color: 0xff4fa8 },
+  { key: 'arcade', label: 'ARCADE', x: 2.75,  z: 0.55,  w: 2.0, d: 2.9, color: 0x38e0ff },
+  { key: 'casino', label: 'CASINO', x: -2.75, z: 0.15,  w: 2.2, d: 3.6, color: 0xb44fff },
+  { key: 'bar',    label: 'BAR',    x: 0,     z: -2.15, w: 6.8, d: 0.9, color: 0xffb347 },
 ];

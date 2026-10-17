@@ -29,8 +29,10 @@ test('分区灯毯：四区齐全、颜色各异、都在房间内、互不重�
   assert.equal(ZONES.length, 4);
   assert.deepEqual(ZONES.map((z) => z.key).sort(), ['arcade', 'bar', 'casino', 'pool']);
   assert.equal(new Set(ZONES.map((z) => z.color)).size, 4);
+  assert.equal(new Set(ZONES.map((z) => z.label)).size, 4, '吊牌/地贴文字应各不相同');
   for (const z of ZONES) {
     assert.ok(z.w > 0 && z.d > 0);
+    assert.ok(z.label && z.label.length >= 3, `${z.key} 缺少吊牌文字`);
     assert.ok(z.x - z.w / 2 >= ROOM.x0 && z.x + z.w / 2 <= ROOM.x1, `${z.key} 灯毯超出房间 X`);
     assert.ok(z.z - z.d / 2 >= ROOM.z0 && z.z + z.d / 2 <= ROOM.z1, `${z.key} 灯毯超出房间 Z`);
   }

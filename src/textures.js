@@ -296,7 +296,8 @@ export function makePalm() {
 }
 
 // 分区灯毯：圆角霓虹描边 + 柔和内发光（迈阿密分区用，尺寸按米传入）
-export function makeZoneRug(w = 224, h = 140, color = '#ff4fa8') {
+// label：地贴文字。旋转 45° —— 等距镜头（yaw 135°）下正好水平可读。
+export function makeZoneRug(w = 224, h = 140, color = '#ff4fa8', label = '') {
   const [c, g] = canvas(w, h);
   const r = Math.min(26, h * 0.22), inset = 6;
   const round = (x, y, ww, hh, rr) => {
@@ -319,5 +320,32 @@ export function makeZoneRug(w = 224, h = 140, color = '#ff4fa8') {
   round(inset + 12, inset + 12, w - (inset + 12) * 2, h - (inset + 12) * 2, Math.max(6, r - 8));
   g.stroke();
   g.globalAlpha = 1;
+  if (label) {                                        // 地贴文字（面向等距镜头）
+    g.save();
+    g.translate(w / 2, h / 2);
+    g.rotate(Math.PI / 4);
+    const fs = Math.max(18, Math.min(60, Math.round(Math.min(w, h * 2) * 0.15)));
+    g.font = `bold ${fs}px monospace`;
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.shadowColor = color; g.shadowBlur = 12;
+    g.fillStyle = 'rgba(255,255,255,0.85)';
+    g.fillText(label, 0, 0);
+    g.restore();
+  }
+  return toTex(c);
+}
+
+// 分区霓虹吊牌：深色板 + 霓虹描边 + 白炽字（正面纹理；背面另用暗板）
+export function makeZoneSign(text = 'POOL', color = '#ff4fa8') {
+  const W = 256, H = 88;
+  const [c, g] = canvas(W, H);
+  g.fillStyle = '#090518'; g.fillRect(0, 0, W, H);
+  g.shadowColor = color; g.shadowBlur = 10;           // 外框霓虹
+  g.strokeStyle = color; g.lineWidth = 5;
+  g.strokeRect(6, 6, W - 12, H - 12);
+  g.shadowBlur = 16; g.fillStyle = '#ffffff';         // 字：白芯 + 彩色光晕
+  g.font = 'bold 44px monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(text, W / 2, H / 2 + 2);
+  g.shadowBlur = 0;
   return toTex(c);
 }

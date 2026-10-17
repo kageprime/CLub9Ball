@@ -366,18 +366,38 @@ export class World {
       p.position.set(x, 1.7 * s, z); p.scale.setScalar(s); p.rotation.y = -Math.PI / 4;
       this.scenery.add(p);
     }
-    // 分区灯毯：分区色圆角霓虹描边（游标环 renderOrder 更高，始终压在上面）
+    // 分区灯毯：分区色圆角霓虹描边 + 地贴文字（游标环 renderOrder 更高，始终压在上面）
     this.zoneGroup = new THREE.Group(); this.zoneGroup.visible = false; this.scene.add(this.zoneGroup);
     const px = 96;   // 每米像素
     for (const zn of ZONES) {
       const col = '#' + zn.color.toString(16).padStart(6, '0');
-      const tex = TX.makeZoneRug(Math.round(zn.w * px), Math.round(zn.d * px), col);
+      const tex = TX.makeZoneRug(Math.round(zn.w * px), Math.round(zn.d * px), col, zn.label);
       const mesh = new THREE.Mesh(
         new THREE.PlaneGeometry(zn.w, zn.d),
         new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false }),
       );
       mesh.rotation.x = -Math.PI / 2; mesh.position.set(zn.x, 0.008, zn.z); mesh.renderOrder = 3;
       this.zoneGroup.add(mesh);
+    }
+    // 分区霓虹吊牌：每个分区上方一块，统一转向等距镜头（-π/4），顶部吊线接天花板
+    this.signGroup = new THREE.Group(); this.signGroup.visible = false; this.scene.add(this.signGroup);
+    this.signMats = [];
+    const SIGN_Y = { pool: 2.92, arcade: 2.60, casino: 2.60, bar: 2.56 };
+    for (const zn of ZONES) {
+      const col = '#' + zn.color.toString(16).padStart(6, '0');
+      const g = new THREE.Group();
+      g.position.set(zn.x, SIGN_Y[zn.key] ?? 2.6, zn.z);
+      g.rotation.y = -Math.PI / 4;
+      const frontMat = new THREE.MeshBasicMaterial({ map: TX.makeZoneSign(zn.label, col), toneMapped: false });
+      const front = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.34), frontMat);
+      front.position.z = 0.012;
+      const back = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.34), new THREE.MeshBasicMaterial({ color: 0x0d0820 }));
+      back.rotation.y = Math.PI; back.position.z = -0.012;
+      const cordLen = Math.max(0.04, ROOM.h - SIGN_Y[zn.key] - 0.17);   // 吊线到天花板
+      this._cyl(0.006, 0.006, cordLen, this._mat(0x111111), 0, 0.17 + cordLen / 2, 0, g, 4).castShadow = false;
+      g.add(front, back);
+      this.signMats.push(frontMat);
+      this.signGroup.add(g);
     }
   }
 
@@ -415,6 +435,7 @@ export class World {
     // 屋外布景与分区灯毯
     if (this.scenery) this.scenery.visible = !!t.sky;
     if (this.zoneGroup) this.zoneGroup.visible = !!t.zones;
+    if (this.signGroup) this.signGroup.visible = !!t.zones;
     return key;
   }
 
@@ -1585,10 +1606,14 @@ export class World {
       this.isoCam.lookAt(this.isoLook);
       this._updateIsoFrustum();
     }
-    // 壁炉闪烁
+    // 壁炉闪烁（强度基值随主题走）
     const f = 0.85 + 0.25 * Math.sin(this.time * 9.1) * Math.sin(this.time * 5.3 + 1) + 0.1 * Math.sin(this.time * 23);
-    this.fireLight.intensity = 9 * f;
+    this.fireLight.intensity = (this.themeData?.fire?.i ?? 9) * f;
     if (this.fireMat) this.fireMat.color.setHSL(0.07 + 0.015 * Math.sin(this.time * 7), 1, 0.45 + 0.08 * f);
+    // 霓虹吊牌呼吸（仅霓虹主题显示时）
+    if (this.signGroup?.visible && this.signMats?.length) {
+      for (let i = 0; i < this.signMats.length; i++) this.signMats[i].color.setScalar(0.9 + 0.1 * Math.sin(this.time * 2.1 + i * 1.7));
+    }
     if (this.houseDiceState?.shake > 0) this._applyHouseDice();
     // 轮盘转轮平滑转动
     if (this.cylinderMesh) { this.cylAngle += (this.cylTarget - this.cylAngle) * (1 - Math.exp(-dt * 14)); this.cylinderMesh.rotation.x = this.cylAngle; }
