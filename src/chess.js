@@ -1,6 +1,8 @@
 // 国际象棋展位与 Pixel Chess 迷你游戏嵌入控制器。
 // 链接：https://chessnuts-nine.vercel.app/chess/index.html
 
+import * as THREE from 'three';
+
 export const DEFAULT_CHESS_URL = 'https://chessnuts-nine.vercel.app/chess/index.html';
 
 export class ChessMini {

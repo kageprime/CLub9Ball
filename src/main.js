@@ -15,6 +15,7 @@ import { ReplayRecorder, ReplayPlayer, FRAME_FLOATS } from './replay.js';
 import { DartsGame } from './darts.js';
 import { Chips, Roulette } from './bar.js';
 import { createPokerDice } from './pokerdice.js';
+import { createLudoMini } from './ludo.js';
 import { pickShot, pickPlacement, legalTargets } from './ai.js';
 import { CameraRig, CAMS, CAM_KEYS } from './cameras.js';
 import { mulberry32 } from './rng.js';
@@ -50,7 +51,7 @@ const G = {
   player: { x: -2.3, z: 0, yaw: 0, pitch: -0.15 },
   aim: { angle: 0, power: 0.5, sx: 0, sy: 0, charging: false },
   cursor: { x: 0, y: 0 },  // 虚拟光标（NDC），自由球与飞镖用
-  settings: { closeup: true, aimline: true, volume: 0.8, pixel: 360, mode: 'cpu', diff: 'normal', cam: 'auto', ...store.get('settings', {}) },
+  settings: { closeup: true, aimline: true, volume: 0.8, pixel: 360, mode: 'cpu', diff: 'normal', cam: 'auto', startVenue: 'pool', ...store.get('settings', {}) },
   achieved: new Set(store.get('ach', [])),
   match: null, potted: [[], []], stats: null,
   lastShot: null, replay: null, closeup: null, rollCam: null,
@@ -71,7 +72,7 @@ rig.set(G.settings.cam);
 let sim, world, audio, recorder, chips, aiRng, coins, chessMini, avatars, net, netBroadcastTimer = 0;
 const snapBuf = new Float32Array(FRAME_FLOATS);
 const sampleBuf = new Float32Array(FRAME_FLOATS);
-const ACH_IDS = ['firstPot', 'combo3', 'breakPot', 'clear', 'eightWin', '180', 'diceStreak', 'roulette3'];
+const ACH_IDS = ['firstPot', 'combo3', 'breakPot', 'clear', 'eightWin', '180', 'diceStreak', 'roulette3', 'ludoWin'];
 
 // ---------------------------------------------------------------- 回合归属：谁是电脑
 const isCpuPlayer = (p) => G.spectate || (G.opp === 'cpu' && G.match?.mode === 'match' && p === 1);
@@ -158,12 +159,13 @@ function renderTurn() {
   if (el.dataset.k !== text) { el.dataset.k = text; $('turn-text').textContent = text; }
 }
 function renderKeyHint() {
-  const k = { walk: 'walk', aim: 'aim', place: 'place', cpu: 'cpu', darts: 'minigame', dice: 'minigame', roulette: 'minigame' }[G.mode];
+  const k = { walk: 'walk', aim: 'aim', place: 'place', cpu: 'cpu', darts: 'minigame', dice: 'minigame', ludo: 'minigame', roulette: 'minigame', chess: 'minigame', drink: 'minigame' }[G.mode];
   $('keyhint').textContent = k === 'cpu' ? t('key.hint.cpu', { p: G.match ? playerName(G.match.turn) : '' }) : k ? t('key.hint.' + k) : '';
 }
+let deckCueDragging = false;
 function renderPower() {
   const bar = $('power-bar');
-  if (!bar.children.length) {
+  if (bar && !bar.children.length) {
     for (let i = 0; i < 12; i++) {
       const s = document.createElement('div'); s.className = 'seg';
       const k = i / 11; s.style.setProperty('--c', `hsl(${18 + k * 40} 90% ${48 + k * 28}%)`);
@@ -171,15 +173,27 @@ function renderPower() {
     }
   }
   const n = Math.round(G.aim.power * 12);
-  [...bar.children].forEach((s, i) => s.classList.toggle('on', i < n));
+  if (bar) [...bar.children].forEach((s, i) => s.classList.toggle('on', i < n));
+
+  const pVal = $('deck-power-val');
+  if (pVal) pVal.textContent = Math.round(G.aim.power * 100) + '%';
+  const stick = $('deck-cue-stick');
+  if (stick && !deckCueDragging) {
+    const dy = Math.round(G.aim.power * 70);
+    stick.style.transform = `translateY(${dy}px)`;
+  }
 }
 function renderSpin() {
-  const c = $('spin'), g = c.getContext('2d'); g.imageSmoothingEnabled = false;
-  g.clearRect(0, 0, 48, 48);
-  g.fillStyle = '#f2ecda'; g.beginPath(); g.arc(24, 24, 20, 0, Math.PI * 2); g.fill();
-  g.fillStyle = '#ffffff'; g.fillRect(14, 12, 6, 5);
-  g.strokeStyle = '#99907a'; g.lineWidth = 1; g.beginPath(); g.moveTo(24, 6); g.lineTo(24, 42); g.moveTo(6, 24); g.lineTo(42, 24); g.stroke();
-  g.fillStyle = '#d02a1c'; g.fillRect(Math.round(24 + G.aim.sx * 15) - 3, Math.round(24 - G.aim.sy * 15) - 3, 6, 6);
+  for (const id of ['spin', 'deck-spin-canvas']) {
+    const c = $(id); if (!c) continue;
+    const g = c.getContext('2d'); g.imageSmoothingEnabled = false;
+    const w = c.width, h = c.height, hw = w / 2, hh = h / 2, r = hw - 4;
+    g.clearRect(0, 0, w, h);
+    g.fillStyle = '#f2ecda'; g.beginPath(); g.arc(hw, hh, r, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#ffffff'; g.fillRect(hw - 10, hh - 12, 6, 5);
+    g.strokeStyle = '#99907a'; g.lineWidth = 1; g.beginPath(); g.moveTo(hw, 4); g.lineTo(hw, h - 4); g.moveTo(4, hh); g.lineTo(w - 4, hh); g.stroke();
+    g.fillStyle = '#d02a1c'; g.fillRect(Math.round(hw + G.aim.sx * (r - 6)) - 3, Math.round(hh - G.aim.sy * (r - 6)) - 3, 6, 6);
+  }
 }
 
 // ---------------------------------------------------------------- 镜头
@@ -195,12 +209,14 @@ function cycleCam(step) { setCam(rig.next(step)); }
 // 每帧：问相机机位要目标（phase：'aim' 瞄准 / 'roll' 球在滚）
 function driveCamera(phase) {
   const c = sim.ballPos(0) || G.lastCue || { x: 0, z: 0 };
-  const res = rig.compute(phase, cpuTurn(), { cue: c, angle: G.camAngle, rollCam: G.rollCam, vel: G.cueVel, dt: G.dt });
+  const aspect = world?.camera?.aspect || 1;
+  const res = rig.compute(phase, cpuTurn(), { cue: c, angle: G.camAngle, rollCam: G.rollCam, vel: G.cueVel, dt: G.dt, aspect });
   world.setCameraTarget(res.pos, res.look, { fov: res.fov, k: res.k });
   G.lamps = res.lamps;
 }
 function orbitKeys(dt) {
-  if (!['aim', 'cpu', 'rolling', 'striking'].includes(G.mode)) return;
+  if (G.mode === 'aim') return; // 瞄准时方向键专用于精准旋转球杆瞄准角度，不打乱相机机位
+  if (!['cpu', 'rolling', 'striking'].includes(G.mode)) return;
   const k = G.keys;
   const yaw = (k.has('ArrowRight') ? 1 : 0) - (k.has('ArrowLeft') ? 1 : 0);
   const pit = (k.has('ArrowUp') ? 1 : 0) - (k.has('ArrowDown') ? 1 : 0);
@@ -240,6 +256,7 @@ function startTurn(keepWalk = false) {
     if (needPlace) enterPlace(true);
     else if (!(keepWalk && G.mode === 'walk')) {
       G.mode = 'aim';
+      if (rig.mode === 'orbit' || rig.mode === 'broadcast') setCam('behind');
       if (G.lastTurn !== m.turn) { G.aim.angle = defaultAimAngle(); G.aim.power = 0.5; }
     }
   }
@@ -433,7 +450,7 @@ function rematch() {
 
 // 结束当前对局，回到主菜单（暂停菜单“结束对局”）
 function quitToMenu() {
-  if (G.mode === 'darts' || G.mode === 'dice' || G.mode === 'roulette') leaveMini();
+  if (G.mode === 'darts' || G.mode === 'dice' || G.mode === 'ludo' || G.mode === 'roulette' || G.mode === 'chess' || G.mode === 'drink') leaveMini();
   clearTimeout(G.endTimer);
   G.started = false; G.paused = false; G.replay = null; G.mode = 'walk';
   G.keys.clear(); G.aim.charging = false;
@@ -445,8 +462,9 @@ function quitToMenu() {
   setReticle(false); G.closeup = null;
   sim.rerack();
   $('hud').hidden = true;
-  $('start').hidden = false; $('loading').hidden = true; $('btn-start').hidden = false; $('start-pick').hidden = G.touch;
-  renderPickers();
+  const deck = $('mobile-deck'); if (deck) deck.hidden = true;
+  $('start').hidden = false; $('loading').hidden = true; $('btn-start').hidden = false; $('start-pick').hidden = false;
+  renderPickers(); renderVenues();
 }
 
 // ---------------------------------------------------------------- 自由球
@@ -475,8 +493,12 @@ function walkCollide(p) {
     const px = hx - Math.abs(p.x), pz = hz - Math.abs(p.z);
     if (px < pz) p.x = Math.sign(p.x || -1) * hx; else p.z = Math.sign(p.z || 1) * hz;
   }
-  const dx = p.x - 2.9, dz = p.z + 1.9, r = 0.95, d = Math.hypot(dx, dz);
-  if (d < r) { p.x = 2.9 + (dx / (d || 1)) * r; p.z = -1.9 + (dz / (d || 1)) * r; }
+  // 骰子桌碰撞（已移至吧台外开阔区域）
+  const dx = p.x - 2.85, dz = p.z - (-0.45), r = 0.95, d = Math.hypot(dx, dz);
+  if (d < r) { p.x = 2.85 + (dx / (d || 1)) * r; p.z = -0.45 + (dz / (d || 1)) * r; }
+  // 飞行棋展桌碰撞
+  const lx = p.x - (-2.85), lz = p.z - (-0.45), lr = 0.95, ld = Math.hypot(lx, lz);
+  if (ld < lr) { p.x = -2.85 + (lx / (ld || 1)) * lr; p.z = -0.45 + (lz / (ld || 1)) * lr; }
   // 国际象棋展桌碰撞
   const cx = p.x - (-2.8), cz = p.z - 1.8, cr = 0.72, cd = Math.hypot(cx, cz);
   if (cd < cr) { p.x = -2.8 + (cx / (cd || 1)) * cr; p.z = 1.8 + (cz / (cd || 1)) * cr; }
@@ -520,12 +542,20 @@ function updateWalk(dt) {
   if (near) { pe.textContent = t('bar.prompt', { what: t(near.labelKey) }); pe.hidden = false; } else pe.hidden = true;
   world.setCue({ visible: false });
   world.setAimLine(null);
+  updateDeckUI();
 }
 
 // ---------------------------------------------------------------- 瞄准
 function updateAim(dt) {
   if (!sim.cueOnTable()) { enterPlace(true); return; }
   const c = sim.ballPos(0), a = G.aim;
+  // 键盘方向键精准微调旋转瞄准角度（按住 Shift 为慢速微调）
+  const k = G.keys;
+  const arrX = (k.has('ArrowRight') ? 1 : 0) - (k.has('ArrowLeft') ? 1 : 0);
+  if (arrX !== 0) {
+    const fine = k.has('ShiftLeft') || k.has('ShiftRight') ? 0.25 : 1.0;
+    a.angle += arrX * 0.9 * dt * fine;
+  }
   if (a.charging) { a.power = clamp(a.power + dt * 0.5, 0.05, 1); renderPower(); }
   const pull = 0.05 + a.power * 0.26;
   world.setCue({ visible: true, x: c.x, z: c.z, angle: a.angle, pull, elev: 0.07, sx: a.sx, sy: a.sy });
@@ -537,10 +567,11 @@ function updateAim(dt) {
     world.setPlayerAvatar({
       x: ax, z: az, yaw: a.angle,
       action: 'pool_stance',
-      visible: G.thirdPerson,
+      visible: false, // 瞄准时自动隐藏自身全身网格，保证第一人称球杆视野与瞄准线完全通畅
     });
   }
   $('prompt').hidden = true;
+  updateDeckUI();
 }
 
 function updatePlace() {
@@ -670,18 +701,24 @@ function enterMini(id) {
   G.mode = id; $('prompt').hidden = true; world.setCue({ visible: false }); world.setAimLine(null);
   G.cursor.x = G.cursor.y = 0;
   document.body.classList.add('in-mini');
-  if (id === 'chess' || id === 'roulette') {
+  if (id === 'chess' || id === 'roulette' || id === 'ludo') {
     try { document.exitPointerLock?.(); } catch (_) {}
     document.body.classList.add('free');
   }
   games[id].enter();
   renderKeyHint();
 }
-function leaveMini() {
+function leaveMini(relock = true) {
   games[G.mode]?.leave?.();
   mini.hide();
   if ($('roulette-ui')) $('roulette-ui').hidden = true;
+  if ($('ludo-ui')) $('ludo-ui').hidden = true;
+  if ($('chess-modal')) $('chess-modal').hidden = true;
   setReticle(false); G.mode = 'walk'; document.body.classList.remove('in-mini'); renderKeyHint();
+  if (relock && !isMobilePortrait() && !G.spectate) {
+    document.body.classList.remove('free');
+    setTimeout(() => lock(), 120);
+  }
 }
 
 const games = {
@@ -755,6 +792,9 @@ const games = {
 
   // ---- 骰子扑克（见 pokerdice.js；boot 里创建）
   dice: null,
+
+  // ---- 飞行棋（见 ludo.js；boot 里创建）
+  ludo: null,
 
   // ---- 俄罗斯轮盘
   roulette: {
@@ -906,11 +946,15 @@ const canvas = $('gl');
 // 指针锁重试：Chromium 在按 Esc 退出锁后 ~1.25 s 内会拒绝再次加锁（chromium issue 40148473），
 // 静默失败会让玩家卡在“没有锁、又打不开暂停菜单”的状态，所以失败要自动重试。
 let lockTries = 0, lockTimer = 0;
+function isMobilePortrait() {
+  return document.body.classList.contains('mobile-portrait');
+}
 function lock() {
+  if (G.touch || isMobilePortrait()) return;
   if (!G.started || G.spectate || document.pointerLockElement === canvas) return;
   clearTimeout(lockTimer); lockTries = 0;
   const attempt = () => {
-    if (document.pointerLockElement === canvas || !G.started || G.spectate || G.paused) return;
+    if (document.pointerLockElement === canvas || !G.started || G.spectate || G.paused || G.touch || isMobilePortrait()) return;
     lockTries++;
     try { const p = canvas.requestPointerLock?.(); p?.catch?.(() => {}); } catch (_) { /* 忽略 */ }
     lockTimer = setTimeout(() => {
@@ -927,21 +971,32 @@ function resumeGame() {
   lock();
 }
 function showPause(on) {
-  G.paused = on; $('pause').hidden = !on; document.body.classList.toggle('free', on || G.mode === 'replay' || G.spectate);
+  const isMob = G.touch || isMobilePortrait();
+  G.paused = on; $('pause').hidden = !on; document.body.classList.toggle('free', on || G.mode === 'replay' || G.spectate || isMob);
+  if (isMob) {
+    const deck = $('mobile-deck');
+    if (deck) deck.hidden = on || !G.started;
+  }
 }
 
 document.addEventListener('pointerlockchange', () => {
+  const isMob = G.touch || isMobilePortrait();
   const locked = document.pointerLockElement === canvas;
   if (locked) { clearTimeout(lockTimer); lockTries = 0; }
-  document.body.classList.toggle('free', !locked || G.spectate);
-  if (!G.started || G.spectate) return;
+  document.body.classList.toggle('free', !locked || G.spectate || isMob);
+  if (!G.started || G.spectate || isMob) return;
   if (!locked && G.mode !== 'replay' && !anyDialog()) showPause(true);
   if (locked) showPause(false);
 });
 function anyDialog() {
   const rEl = $('roulette-ui');
   const isRouletteOpen = rEl && !rEl.hidden;
-  return !$('settings').hidden || !$('about').hidden || !$('over').hidden || !$('net-modal').hidden || !$('chess-modal').hidden || isRouletteOpen || G.mode === 'chess' || G.mode === 'roulette';
+  const lEl = $('ludo-ui');
+  const isLudoOpen = lEl && !lEl.hidden;
+  const cEl = $('chess-modal');
+  const isChessOpen = cEl && !cEl.hidden;
+  const isMini = ['chess', 'roulette', 'ludo', 'dice', 'darts', 'drink'].includes(G.mode);
+  return !$('settings').hidden || !$('about').hidden || !$('over').hidden || !$('net-modal').hidden || !$('launcher').hidden || isChessOpen || isRouletteOpen || isLudoOpen || isMini;
 }
 
 document.addEventListener('mousemove', (e) => {
@@ -959,7 +1014,9 @@ document.addEventListener('mousemove', (e) => {
 document.addEventListener('mousedown', (e) => {
   if (!G.started || G.paused || e.button !== 0) return;
   if (document.pointerLockElement !== canvas) {
-    if (e.target === canvas && !G.spectate && !anyDialog()) lock();   // 失去指针锁后，点画面即可重新接管鼠标
+    if (e.target === canvas && !G.spectate && !G.touch && !isMobilePortrait() && !anyDialog()) lock();
+    if (isMobilePortrait() && e.target === canvas && G.mode === 'place') confirmPlace();
+    if (G.mode === 'ludo' && e.target === canvas) games.ludo?.onCanvasClick?.(e.clientX, e.clientY);
     return;
   }
   if (G.mode === 'aim') { G.aim.charging = true; }
@@ -997,14 +1054,16 @@ document.addEventListener('keydown', (e) => {
   }
   if (c === 'KeyM') { const m = audio.toggleMute(); toast(t(m ? 'msg.muted' : 'msg.unmuted'), 1000); return; }
   if (c === 'Escape' && G.mode !== 'replay') {
+    if (launcherOpen) { closeLauncher(); return; }
     if (G.paused) { resumeGame(); return; }
-    if (G.mode === 'darts' || G.mode === 'dice' || G.mode === 'roulette' || G.mode === 'chess' || G.mode === 'drink') {
+    if (G.mode === 'darts' || G.mode === 'dice' || G.mode === 'ludo' || G.mode === 'roulette' || G.mode === 'chess' || G.mode === 'drink') {
       leaveMini();
       return;
     }
     if (document.pointerLockElement !== canvas && !anyDialog()) { showPause(true); return; }
   }
   if (G.paused) return;
+  if (c === 'KeyL') { launcherOpen ? closeLauncher() : openLauncher(); return; }
   G.keys.add(c);
   if (!$('over').hidden) { if (c === 'Enter') rematch(); return; }
   if (c === 'Enter' && G.mode === 'walk') { openChatBar(); return; }
@@ -1013,7 +1072,7 @@ document.addEventListener('keydown', (e) => {
     else if (c === 'Space') { const r = G.replay; if (r.finished) { r.seek(0); r.playing = true; } else r.playing = !r.playing; }
     return;
   }
-  if (G.mode === 'darts' || G.mode === 'dice' || G.mode === 'roulette' || G.mode === 'chess' || G.mode === 'drink') {
+  if (G.mode === 'darts' || G.mode === 'dice' || G.mode === 'ludo' || G.mode === 'roulette' || G.mode === 'chess' || G.mode === 'drink') {
     if (c === 'KeyQ') leaveMini(); else games[G.mode]?.onKey?.(c);
     return;
   }
@@ -1029,7 +1088,18 @@ document.addEventListener('keydown', (e) => {
   }
   if (G.mode === 'rolling' || G.mode === 'striking') return;
   switch (c) {
-    case 'KeyE': if (G.mode === 'walk') { G.mode = 'aim'; G.aim.angle = Math.atan2(Math.sin(G.player.yaw), Math.cos(G.player.yaw)); renderKeyHint(); } else if (G.mode === 'aim') { G.mode = 'walk'; renderKeyHint(); } break;
+    case 'KeyE':
+      if (G.mode === 'walk') {
+        G.mode = 'aim';
+        if (rig.mode === 'orbit' || rig.mode === 'broadcast') setCam('behind');
+        G.aim.angle = Math.atan2(Math.sin(G.player.yaw), Math.cos(G.player.yaw));
+        renderKeyHint();
+        if (!isMobilePortrait() && !G.spectate) lock();
+      } else if (G.mode === 'aim') {
+        G.mode = 'walk';
+        renderKeyHint();
+      }
+      break;
     case 'KeyQ': if (G.mode === 'walk' && G.nearProp) enterMini(G.nearProp.id); break;
     case 'Space': if (G.mode === 'aim') doShoot(powerParams()); break;
     case 'KeyF': G.mode === 'place' ? (G.mode = 'aim', renderKeyHint()) : enterPlace(); break;
@@ -1050,7 +1120,11 @@ document.addEventListener('keydown', (e) => {
 });
 document.addEventListener('keyup', (e) => G.keys.delete(e.code));
 window.addEventListener('blur', () => G.keys.clear());
-window.addEventListener('resize', () => world?.resize());
+window.addEventListener('resize', () => {
+  updateMobilePortrait();
+  world?.resize();
+  updateDeckUI();
+});
 
 // ---------------------------------------------------------------- 模式选择（开始画面 + 暂停菜单共用）
 function renderPickers() {
@@ -1063,16 +1137,29 @@ function renderPickers() {
   });
 }
 function applyMode(restart) {
-  if (G.mode === 'darts' || G.mode === 'dice' || G.mode === 'roulette') leaveMini();   // 从小游戏切模式时先收尾
+  if (G.mode === 'darts' || G.mode === 'dice' || G.mode === 'ludo' || G.mode === 'roulette' || G.mode === 'chess' || G.mode === 'drink') leaveMini();   // 从小游戏切模式时先收尾
   const id = G.settings.mode;
-  G.spectate = G.touch || id === 'watch';
+  G.spectate = id === 'watch';
   G.opp = id === 'cpu' ? 'cpu' : 'human';
   document.body.classList.toggle('spectating', G.spectate);
   if (G.spectate) document.body.classList.add('free');
   if (restart) newGame(id === 'practice' ? 'practice' : 'match', true);
-  renderPickers(); if (G.match) renderHUD();
+  renderPickers(); renderVenues(); if (G.match) renderHUD();
+  updateDeckUI();
 }
 document.addEventListener('click', (e) => {
+  if (launcherOpen && e.target === $('launcher')) { closeLauncher(); return; }
+  const vb = e.target.closest('.venue-btn');
+  if (vb) {
+    const key = vb.dataset.venue;
+    if (!G.started) {      // 开局前：点选起始地点
+      G.settings.startVenue = key; saveSettings();
+      document.querySelectorAll('.venue-btn').forEach((b) => b.classList.toggle('on', b.dataset.venue === key));
+    } else {
+      launchVenue(key);
+    }
+    return;
+  }
   const mc = e.target.closest('[data-mode]');
   if (mc) {
     G.settings.mode = mc.dataset.mode; saveSettings();
@@ -1103,7 +1190,369 @@ function fillAbout() {
 function openPanel(id) { $(id).hidden = false; $('pause').hidden = true; if (id === 'about') fillAbout(); if (id === 'settings') renderBadges(); document.exitPointerLock?.(); document.body.classList.add('free'); }
 function closePanel(id) { $(id).hidden = true; if (!anyDialog()) { if (G.started && !G.spectate) showPause(true); } }
 
+// ---------------------------------------------------------------- 移动端街机触控面板 & 酒吧漫步
+const VENUES = {
+  pool: { x: -2.3, z: 0, yaw: 0, isPool: true },
+  darts: { x: 1.82, z: 1.6, yaw: 0, prop: 'darts' },
+  dice: { x: 2.15, z: -0.45, yaw: 0, prop: 'dice' },
+  ludo: { x: -2.15, z: -0.45, yaw: Math.PI, prop: 'ludo' },
+  chess: { x: -2.1, z: 1.8, yaw: Math.PI / 2, prop: 'chess' },
+  roulette: { x: -1.6, z: -1.45, yaw: -Math.PI / 2, prop: 'roulette' },
+  drink: { x: -0.6, z: -1.3, yaw: -Math.PI / 2, prop: 'drink' },
+};
+const VENUE_ICONS = { pool: '🎱', darts: '🎯', dice: '🎲', ludo: '✈️', chess: '♟️', roulette: '🔫', drink: '🍸' };
+
+// 渲染直达卡片（开始画面 = 选开局地点；游戏中 = 一键直达）
+function renderVenues() {
+  document.querySelectorAll('[data-venues]').forEach((box) => {
+    box.hidden = G.spectate;
+    box.innerHTML = Object.keys(VENUES).map((key) => `<button class="venue-btn ${!G.started && G.settings.startVenue === key ? 'on' : ''}" data-venue="${key}"><span class="vico">${VENUE_ICONS[key] || '🎮'}</span><b>${t('venue.' + key)}</b></button>`).join('');
+  });
+  const sv = $('start-venue');
+  if (sv) sv.hidden = G.spectate;   // 观战模式没有“开局地点”
+}
+
+// 直达面板（L 开关）
+let launcherOpen = false;
+function openLauncher() {
+  if (launcherOpen || !G.started || G.paused || G.spectate || G.mode === 'replay' || !$('over').hidden) return;
+  launcherOpen = true;
+  $('launcher').hidden = false;
+  document.body.classList.add('free');
+  try { document.exitPointerLock?.(); } catch (_) { /* 忽略 */ }
+}
+function closeLauncher() {
+  if (!launcherOpen) return;
+  launcherOpen = false;
+  $('launcher').hidden = true;
+  if (!(G.mode === 'chess' || G.mode === 'ludo' || G.mode === 'roulette')) lock();
+}
+
+// 传送 + 直接进入台位/小游戏（暂停菜单、L 面板、移动端卡片、开局地点共用）
+function launchVenue(key) {
+  const v = VENUES[key];
+  if (!v || !G.started || G.spectate) return;
+  if (G.mode === 'rolling' || G.mode === 'striking' || G.mode === 'cpu' || G.mode === 'place') { toast(t('launcher.busy'), 1200); return; }
+  if (launcherOpen) { launcherOpen = false; $('launcher').hidden = true; }
+  if (G.paused) showPause(false);
+  G.player.x = v.x; G.player.z = v.z; G.player.yaw = v.yaw;
+  walkCollide(G.player);
+  if (['darts', 'dice', 'ludo', 'roulette', 'chess', 'drink'].includes(G.mode)) leaveMini(false);
+  if (v.isPool) {
+    if (rig.mode === 'orbit' || rig.mode === 'broadcast') setCam('behind');
+    G.aim.angle = Math.atan2(Math.sin(G.player.yaw), Math.cos(G.player.yaw));
+    G.mode = 'aim';
+    renderKeyHint();
+    lock();
+    toast('🎱 ' + t('venue.pool'), 900);
+  } else {
+    enterMini(v.prop);
+    if (v.prop === 'darts' || v.prop === 'dice' || v.prop === 'drink') lock();   // 需要指针锁的游戏重新加锁
+  }
+  updateDeckUI();
+}
+
+function updateMobilePortrait() {
+  const isPortrait = window.innerHeight > window.innerWidth;
+  const isCoarse = matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window);
+  const isNarrow = window.innerWidth <= 840;
+  const isMobile = isPortrait && (isCoarse || isNarrow);
+  const changed = document.body.classList.contains('mobile-portrait') !== isMobile;
+  document.body.classList.toggle('mobile-portrait', isMobile);
+  if (isMobile) {
+    document.body.classList.add('free');
+  }
+  const deck = $('mobile-deck');
+  if (deck) deck.hidden = !isMobile || !G.started || G.paused;
+  if (changed && world) world.resize();
+  return isMobile;
+}
+
+function updateDeckUI() {
+  const isDeck = document.body.classList.contains('mobile-portrait');
+  const deck = $('mobile-deck');
+  if (!deck) return;
+  if (!G.started || G.paused || !isDeck) { deck.hidden = true; return; }
+  deck.hidden = false;
+
+  const aimView = $('deck-aim-view');
+  const loungeView = $('deck-lounge-view');
+  const isAiming = G.mode === 'aim' || G.mode === 'striking' || G.mode === 'rolling' || G.mode === 'place' || G.mode === 'cpu';
+
+  if (isAiming) {
+    if (aimView) aimView.hidden = false;
+    if (loungeView) loungeView.hidden = true;
+
+    const deg = ((G.aim.angle * 180 / Math.PI) % 360 + 360) % 360;
+    const aVal = $('deck-aim-val');
+    if (aVal) aVal.textContent = deg.toFixed(1) + '°';
+
+    const camName = $('deck-cam-name');
+    if (camName) camName.textContent = (rig.mode || 'AUTO').toUpperCase();
+
+    const alState = $('deck-aimline-state');
+    if (alState) {
+      alState.textContent = G.settings.aimline ? 'ON' : 'OFF';
+      alState.style.color = G.settings.aimline ? 'var(--green)' : 'var(--dim)';
+    }
+
+    const freeBtn = $('deck-btn-free');
+    if (freeBtn) {
+      freeBtn.classList.toggle('active', G.mode === 'place' || (G.match && G.match.ballInHand));
+    }
+  } else if (G.mode === 'walk') {
+    if (aimView) aimView.hidden = true;
+    if (loungeView) loungeView.hidden = false;
+
+    const nearLbl = $('lounge-near-status');
+    const enterBtn = $('lounge-btn-enter');
+    if (G.nearProp) {
+      if (nearLbl) nearLbl.textContent = t('bar.prompt', { what: t(G.nearProp.labelKey) });
+      if (enterBtn) {
+        enterBtn.classList.add('ready');
+        enterBtn.textContent = '▶ ' + t(G.nearProp.labelKey);
+      }
+    } else {
+      const dToTable = Math.hypot(G.player.x, G.player.z);
+      if (dToTable < 1.6) {
+        if (nearLbl) nearLbl.textContent = 'Near Pool Table';
+        if (enterBtn) {
+          enterBtn.classList.add('ready');
+          enterBtn.textContent = '🎱 ' + t('deck.aim');
+        }
+      } else {
+        if (nearLbl) nearLbl.textContent = 'Swipe to look · Tap venue';
+        if (enterBtn) {
+          enterBtn.classList.remove('ready');
+          enterBtn.textContent = t('deck.enter');
+        }
+      }
+    }
+  } else {
+    deck.hidden = true;
+  }
+}
+
+function setupDeckControls() {
+  const nudge = (deg) => {
+    if (G.mode !== 'aim') return;
+    G.aim.angle += deg * Math.PI / 180;
+    updateDeckUI();
+  };
+  $('deck-jog-ll')?.addEventListener('click', () => nudge(-2.5));
+  $('deck-jog-l')?.addEventListener('click', () => nudge(-0.5));
+  $('deck-jog-r')?.addEventListener('click', () => nudge(0.5));
+  $('deck-jog-rr')?.addEventListener('click', () => nudge(2.5));
+
+  $('deck-cam-btn')?.addEventListener('click', () => {
+    cycleCam(1);
+    updateDeckUI();
+  });
+
+  $('deck-btn-aimline')?.addEventListener('click', () => {
+    G.settings.aimline = !G.settings.aimline;
+    saveSettings();
+    toast(t(G.settings.aimline ? 'msg.aimOn' : 'msg.aimOff'), 900);
+    updateDeckUI();
+  });
+
+  $('deck-btn-stand')?.addEventListener('click', () => {
+    if (G.mode === 'aim') {
+      G.mode = 'walk';
+      updateDeckUI();
+      renderKeyHint();
+    }
+  });
+
+  $('deck-btn-free')?.addEventListener('click', () => {
+    if (G.mode === 'place') {
+      G.mode = 'aim';
+    } else {
+      enterPlace();
+    }
+    updateDeckUI();
+  });
+
+  // Spin canvas
+  const spinCvs = $('deck-spin-canvas');
+  if (spinCvs) {
+    const handleSpin = (e) => {
+      const r = spinCvs.getBoundingClientRect();
+      const x = (e.clientX - r.left) / r.width * 2 - 1;
+      const y = -((e.clientY - r.top) / r.height * 2 - 1);
+      const len = Math.hypot(x, y);
+      const s = len > 1 ? 1 / len : 1;
+      G.aim.sx = Math.round(x * s * 10) / 10;
+      G.aim.sy = Math.round(y * s * 10) / 10;
+      renderSpin();
+    };
+    let spinDragging = false;
+    spinCvs.addEventListener('pointerdown', (e) => {
+      spinDragging = true;
+      spinCvs.setPointerCapture(e.pointerId);
+      handleSpin(e);
+    });
+    spinCvs.addEventListener('pointermove', (e) => {
+      if (spinDragging) handleSpin(e);
+    });
+    const stopSpin = () => { spinDragging = false; };
+    spinCvs.addEventListener('pointerup', stopSpin);
+    spinCvs.addEventListener('pointercancel', stopSpin);
+  }
+
+  // Pullback cue track
+  const track = $('deck-cue-track');
+  const stick = $('deck-cue-stick');
+  if (track && stick) {
+    let startY = 0;
+    const maxPull = 70;
+    track.addEventListener('pointerdown', (e) => {
+      if (!G.started || G.paused || G.mode !== 'aim' || !sim.cueOnTable() || sim.phase !== 'idle') return;
+      deckCueDragging = true;
+      startY = e.clientY;
+      track.setPointerCapture(e.pointerId);
+    });
+    track.addEventListener('pointermove', (e) => {
+      if (!deckCueDragging || G.mode !== 'aim') return;
+      const dy = Math.max(0, Math.min(maxPull, e.clientY - startY));
+      const p = Math.max(0.05, Math.min(1.0, dy / maxPull));
+      G.aim.power = p;
+      stick.style.transform = `translateY(${dy}px)`;
+      const pVal = $('deck-power-val');
+      if (pVal) pVal.textContent = Math.round(p * 100) + '%';
+    });
+    const onRelease = () => {
+      if (!deckCueDragging) return;
+      deckCueDragging = false;
+      if (G.mode !== 'aim' || !sim.cueOnTable() || sim.phase !== 'idle') {
+        stick.style.transform = 'translateY(0)';
+        return;
+      }
+      stick.style.transition = 'transform 0.08s ease-out';
+      stick.style.transform = 'translateY(-8px)';
+      if (navigator.vibrate) navigator.vibrate(20);
+      setTimeout(() => {
+        doShoot(powerParams());
+        setTimeout(() => {
+          stick.style.transition = 'transform 0.15s ease-in-out';
+          stick.style.transform = 'translateY(0)';
+        }, 120);
+      }, 70);
+    };
+    track.addEventListener('pointerup', onRelease);
+    track.addEventListener('pointercancel', onRelease);
+  }
+
+  // Lounge Venues：一键直达（传送 + 直接进入）
+  document.querySelectorAll('.lounge-vcard').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const vKey = btn.dataset.venue;
+      if (!VENUES[vKey]) return;
+      document.querySelectorAll('.lounge-vcard').forEach(b => b.classList.toggle('active', b === btn));
+      launchVenue(vKey);
+    });
+  });
+
+  $('lounge-btn-enter')?.addEventListener('click', () => {
+    if (G.nearProp) {
+      enterMini(G.nearProp.id);
+    } else {
+      const dToTable = Math.hypot(G.player.x, G.player.z);
+      if (dToTable < 1.6) {
+        G.mode = 'aim';
+        updateDeckUI();
+      }
+    }
+  });
+
+  $('deck-btn-avatar')?.addEventListener('click', () => {
+    G.thirdPerson = !G.thirdPerson;
+    world.setAvatarFirstPerson('player', !G.thirdPerson);
+    if (world.avatars?.player) world.avatars.player.group.visible = !!G.thirdPerson;
+    toast(G.thirdPerson ? 'View: 3rd Person' : 'View: 1st Person', 800);
+  });
+
+  // Canvas Pointer & Touch Swiping (Aim / Walk / Free Ball)
+  let dragStartX = 0, dragStartY = 0;
+  let lastDragX = 0, lastDragY = 0;
+  let isDragging = false;
+  let moved = false;
+
+  const onDragStart = (cx, cy) => {
+    if (!G.started || G.paused) return;
+    isDragging = true;
+    moved = false;
+    dragStartX = lastDragX = cx;
+    dragStartY = lastDragY = cy;
+  };
+
+  const onDragMove = (cx, cy, prevent = null) => {
+    if (!isDragging || !G.started || G.paused) return;
+    const dx = cx - lastDragX;
+    const dy = cy - lastDragY;
+    if (Math.hypot(cx - dragStartX, cy - dragStartY) > 3) moved = true;
+
+    if (G.mode === 'aim') {
+      prevent?.();
+      G.aim.angle += dx * 0.0024;
+      updateDeckUI();
+    } else if (G.mode === 'walk') {
+      prevent?.();
+      G.player.yaw += dx * 0.003;
+      G.player.pitch = clamp(G.player.pitch - dy * 0.003, -1.2, 1.2);
+    } else if (G.mode === 'place') {
+      prevent?.();
+      G.cursor.x = clamp(G.cursor.x + dx / innerWidth * 2, -1, 1);
+      G.cursor.y = clamp(G.cursor.y - dy / innerHeight * 2, -1, 1);
+    }
+    lastDragX = cx;
+    lastDragY = cy;
+  };
+
+  const onDragEnd = () => {
+    if (!isDragging) return;
+    isDragging = false;
+    if (!moved && G.mode === 'place') {
+      confirmPlace();
+    }
+    if (!moved && G.mode === 'ludo') {
+      games.ludo?.onCanvasClick?.(lastDragX, lastDragY);
+    }
+  };
+
+  canvas.addEventListener('pointerdown', (e) => {
+    if (document.pointerLockElement !== canvas) {
+      onDragStart(e.clientX, e.clientY);
+      if (e.pointerType === 'mouse' && !G.spectate && !isMobilePortrait() && !anyDialog()) {
+        lock();
+      }
+    }
+  });
+
+  window.addEventListener('pointermove', (e) => {
+    if (document.pointerLockElement !== canvas && isDragging) {
+      onDragMove(e.clientX, e.clientY, () => e.preventDefault());
+    }
+  });
+
+  window.addEventListener('pointerup', () => onDragEnd());
+  window.addEventListener('pointercancel', () => onDragEnd());
+
+  canvas.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 1) onDragStart(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', (e) => {
+    if (isDragging && e.touches.length === 1) {
+      onDragMove(e.touches[0].clientX, e.touches[0].clientY, () => e.preventDefault());
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', () => onDragEnd(), { passive: false });
+}
+
 function bindUI() {
+  setupDeckControls();
   $('btn-settings').onclick = () => openPanel('settings');
   $('btn-free').onclick = () => { if (G.spectate || G.mode === 'cpu') return; if (G.paused) resumeGame(); if (G.mode === 'aim' || G.mode === 'walk') enterPlace(); };
   $('pz-resume').onclick = () => resumeGame();
@@ -1182,7 +1631,7 @@ function bindUI() {
   };
 
   $('alt-free').textContent = 'FREE BALL'; $('alt-settings').textContent = 'SETTINGS';
-  onLang(() => { renderPickers(); renderCamBar(); if (G.match) renderHUD(); renderBadges(); $('alt-free').textContent = getLang() === 'zh' ? '自由球' : 'FREE BALL'; $('alt-settings').textContent = getLang() === 'zh' ? '设置' : 'SETTINGS'; if (G.replay) updateReplayUI(); if (!$('about').hidden) fillAbout(); });
+  onLang(() => { renderPickers(); renderVenues(); renderCamBar(); if (G.match) renderHUD(); renderBadges(); $('alt-free').textContent = getLang() === 'zh' ? '自由球' : 'FREE BALL'; $('alt-settings').textContent = getLang() === 'zh' ? '设置' : 'SETTINGS'; if (G.replay) updateReplayUI(); if (!$('about').hidden) fillAbout(); });
 }
 
 function openNetModal() {
@@ -1272,7 +1721,7 @@ function update(dt) {
     case 'striking': driveCamera('aim'); break;
     case 'rolling': driveCamera('roll'); break;
     case 'replay': updateReplay(dt); break;
-    case 'darts': case 'dice': case 'roulette': case 'chess': case 'drink': games[G.mode]?.update?.(dt); break;
+    case 'darts': case 'dice': case 'ludo': case 'roulette': case 'chess': case 'drink': games[G.mode]?.update?.(dt); break;
     default: break;
   }
   if (G.mode !== 'darts' && G.mode !== 'place') setReticle(false);
@@ -1307,12 +1756,13 @@ function update(dt) {
 // ---------------------------------------------------------------- 启动
 async function boot() {
   initLang(); bindUI(); applyDom(); renderBadges();
+  updateMobilePortrait();
   const q = new URLSearchParams(location.search);
   G.touch = matchMedia('(pointer: coarse)').matches && 'ontouchstart' in window;
   if (q.has('spectate')) G.settings.mode = 'watch';
   if (MODES.includes(q.get('mode'))) G.settings.mode = q.get('mode');
   if (!MODES.includes(G.settings.mode)) G.settings.mode = 'cpu';
-  if (G.touch) { document.body.classList.add('touch'); $('start-touch').hidden = false; G.settings.mode = 'watch'; }
+  if (G.touch) { document.body.classList.add('touch'); $('start-touch').hidden = false; }
   renderPickers(); renderCamBar();
   try { await RAPIER.init(); } catch (e) { $('loading').textContent = 'Rapier 加载失败：' + e; return; }
   aiRng = mulberry32(99); aiRng.gauss = aiRng.gauss;
@@ -1388,10 +1838,11 @@ async function boot() {
   }
 
   games.dice = createPokerDice({ THREE, RAPIER, world, audio, chips, saveChips, toast, unlock, t, $ });
+  games.ludo = createLudoMini({ world, audio, coins, toast, unlock, t, $ });
   applySettings();
   applyMode(true);
   G.aim.angle = 0;
-  $('loading').hidden = true; $('btn-start').hidden = false; if ($('btn-customize')) $('btn-customize').hidden = false; $('start-pick').hidden = G.touch;
+  $('loading').hidden = true; $('btn-start').hidden = false; if ($('btn-customize')) $('btn-customize').hidden = false; $('start-pick').hidden = false;
   requestAnimationFrame(frame);
 
   $('btn-start').onclick = async () => {
@@ -1399,11 +1850,14 @@ async function boot() {
     $('start').hidden = true; $('hud').hidden = false; G.started = true;
     $('spectate').hidden = true;
     G.mode = 'walk';
+    updateMobilePortrait();
     applyMode(true);
     if (G.spectate) toast(t(G.touch ? 'msg.touch' : 'mode.watch.d'));
-    else { lock(); toast(t('msg.break'), 1600); }
+    else { if (!G.touch && !isMobilePortrait()) lock(); toast(t('msg.break'), 1600); }
     renderHUD(); renderPower(); renderSpin(); renderCamBar();
+    updateDeckUI();
     startTurn(true);
+    if (!G.spectate && G.mode === 'walk' && G.settings.startVenue && G.settings.startVenue !== 'pool') launchVenue(G.settings.startVenue);   // 直接开在选定的台位
   };
 }
 boot();

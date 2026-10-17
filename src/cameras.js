@@ -106,6 +106,9 @@ export class CameraRig {
       default:
         pos = new V3(0, Y + 1.2, 2); look = new V3(0, Y, 0);
     }
+    if (ctx.aspect && ctx.aspect < 1.0) {
+      fov = Math.min(68, fov / Math.sqrt(ctx.aspect));
+    }
     return { mode, pos, look, fov, k, lamps };
   }
 }

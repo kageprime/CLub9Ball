@@ -77,7 +77,7 @@ body.free .hud-btn { pointer-events: auto; }
 .badge.on { background: #3a2a0a; color: var(--gold); box-shadow: 0 0 0 2px var(--gold), 0 0 0 4px #000; }
 #spectate { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); background: #000a; padding: 8px 14px; color: var(--cyan); }
 
-#msg { position: fixed; left: 50%; top: 26%; transform: translateX(-50%); font-size: 16px; color: var(--gold); text-align: center; max-width: 80vw; text-shadow: 2px 2px 0 #000; animation: pop .18s steps(3); }
+#msg { position: fixed; left: 50%; top: 26%; transform: translateX(-50%); font-size: 16px; color: var(--gold); text-align: center; max-width: 80vw; text-shadow: 2px 2px 0 #000; animation: pop .18s steps(3); z-index: 13; }
 @keyframes pop { from { transform: translateX(-50%) scale(.7); } to { transform: translateX(-50%) scale(1); } }
 #prompt { position: fixed; left: 50%; bottom: 150px; transform: translateX(-50%); color: var(--cyan); }
 #achtoast { position: fixed; right: 22px; top: 70px; color: var(--gold); animation: pop .2s steps(3); transform-origin: right; }
@@ -168,6 +168,22 @@ kbd { display: inline-block; font: inherit; font-size: 10px; color: var(--gold);
 .diffrow[hidden] { display: none; }
 .pz-label { font-size: 10px; color: var(--dim); text-align: center; }
 #start-pick { display: flex; flex-direction: column; align-items: center; }
+
+/* ---------- 小游戏直达卡片（开始画面 / 暂停菜单 / L 面板） ---------- */
+.venue-label { font-size: 10px; color: var(--dim); text-align: center; letter-spacing: 2px; margin-bottom: 8px; }
+#start-venue { display: flex; flex-direction: column; align-items: center; margin-top: 14px; }
+#start-venue[hidden] { display: none; }
+.venue-grid { display: grid; grid-template-columns: repeat(4, minmax(88px, 1fr)); gap: 8px; width: 100%; max-width: 520px; margin: 0 auto; }
+.venue-btn { font: inherit; display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--text); background: #10142a; border: 0; cursor: pointer; padding: 10px 6px 8px; box-shadow: inset 0 0 0 3px var(--edge-dark), 0 0 0 3px #000; pointer-events: auto; }
+.venue-btn .vico { font-size: 19px; line-height: 1; }
+.venue-btn b { font-size: 10px; font-weight: normal; color: var(--dim); }
+.venue-btn:hover { box-shadow: inset 0 0 0 3px var(--cyan), 0 0 0 3px #000; }
+.venue-btn:hover b { color: var(--text); }
+.venue-btn.on { background: #2a2008; box-shadow: inset 0 0 0 3px var(--gold), 0 0 0 3px #000, 0 0 18px #ffb84a55; }
+.venue-btn.on b { color: var(--gold); }
+.launcher-panel .sub { text-align: center; }
+@media (max-width: 900px) { .venue-grid { grid-template-columns: repeat(4, 1fr); gap: 6px; } .venue-btn { padding: 8px 4px 6px; } .venue-btn b { font-size: 9px; } }
+
 .menu { min-width: min(560px, 92vw); }
 
 #turnbar { position: absolute; left: 50%; top: 22px; transform: translateX(-50%); font-size: 13px; color: var(--text); white-space: nowrap; transition: box-shadow .2s; }
@@ -325,7 +341,7 @@ body.free .cam-chip { pointer-events: auto; cursor: pointer; }
   color: var(--dim);
 }
 
-/* ---------- 国际象棋 Pixel Chess 弹窗 ---------- */
+/* ---------- 国际象棋 弹窗 ---------- */
 #chess-modal {
   z-index: 30;
   background: rgba(8, 6, 12, 0.88);
@@ -333,6 +349,9 @@ body.free .cam-chip { pointer-events: auto; cursor: pointer; }
   align-items: center;
   justify-content: center;
   padding: 16px;
+}
+#chess-modal[hidden], #ludo-ui[hidden], .overlay[hidden], [hidden] {
+  display: none !important;
 }
 .chess-frame-wrapper {
   width: min(92vw, 840px);
@@ -477,4 +496,574 @@ body.free .cam-chip { pointer-events: auto; cursor: pointer; }
 }
 #chat-bar button {
   white-space: nowrap;
+}
+
+/* ---------- 移动端街机触控面板 (Mobile Arcade Deck) ---------- */
+:root {
+  --deck-h: 270px;
+}
+
+#mobile-deck {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--deck-h);
+  background: linear-gradient(180deg, #1f1610 0%, #150d09 40%, #0c0806 100%);
+  border-top: 3px solid #5a3c26;
+  box-shadow: 0 -4px 0 #000, 0 -12px 24px rgba(0,0,0,0.7);
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 12px;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+body:not(.mobile-portrait) #mobile-deck {
+  display: none !important;
+}
+
+body.mobile-portrait canvas#gl {
+  top: calc((100% - var(--deck-h)) / 2);
+  left: 50%;
+  transform: translate(-50%, -50%);
+  touch-action: none;
+}
+
+body.mobile-portrait #keys,
+body.mobile-portrait #power,
+body.mobile-portrait #cambar,
+body.mobile-portrait #spin,
+body.mobile-portrait #mode-label {
+  display: none !important;
+}
+
+/* 移动端顶部紧凑 HUD */
+body.mobile-portrait #hud .player {
+  position: absolute;
+  width: auto;
+  max-width: 44vw;
+  padding: 4px 8px;
+  font-size: 9px;
+  background: rgba(16, 20, 36, 0.9);
+}
+body.mobile-portrait #hud-p1 {
+  top: 6px;
+  left: 6px;
+}
+body.mobile-portrait #hud-p2 {
+  top: 6px;
+  left: auto;
+  right: 6px;
+}
+body.mobile-portrait .pname {
+  font-size: 10px;
+}
+body.mobile-portrait .ball {
+  width: 14px;
+  height: 14px;
+  font-size: 7px;
+}
+body.mobile-portrait .ball span {
+  width: 9px;
+  height: 9px;
+  font-size: 6px;
+}
+body.mobile-portrait #hud-coins {
+  position: absolute;
+  top: 6px;
+  right: 50%;
+  transform: translateX(50%);
+  font-size: 11px;
+  padding: 3px 6px;
+  gap: 4px;
+}
+body.mobile-portrait #turnbar {
+  top: 48px;
+  font-size: 10px;
+  padding: 3px 8px;
+}
+body.mobile-portrait #btn-free {
+  display: none;
+}
+body.mobile-portrait #btn-settings {
+  top: 48px;
+  right: 6px;
+  left: auto;
+  width: auto;
+  padding: 4px 6px;
+  font-size: 9px;
+  pointer-events: auto;
+}
+body.mobile-portrait #btn-net {
+  top: 48px;
+  left: 6px;
+  width: auto;
+  padding: 4px 6px;
+  font-size: 9px;
+  pointer-events: auto;
+}
+
+/* 街机操作面板布局 */
+#deck-aim-view, #deck-lounge-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  justify-content: space-between;
+}
+
+.deck-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.deck-controls-row {
+  justify-content: space-between;
+  background: #0f0a06;
+  padding: 6px 8px;
+  border: 2px solid #362215;
+  box-shadow: inset 0 2px 4px #000;
+}
+
+#deck-spin-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+#deck-spin-canvas {
+  width: 44px;
+  height: 44px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px #7a5033, 0 0 0 4px #000;
+  display: block;
+}
+
+.deck-lbl {
+  font-size: 8px;
+  color: var(--gold);
+  letter-spacing: 0.5px;
+}
+
+.deck-aim-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  flex: 1;
+}
+
+.deck-aim-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 9px;
+}
+
+#deck-aim-val {
+  color: var(--green);
+  font-weight: bold;
+}
+
+.deck-btn-strip {
+  display: flex;
+  gap: 3px;
+}
+
+.deck-jog {
+  padding: 4px 8px;
+  font-size: 10px;
+  touch-action: manipulation;
+}
+
+.deck-cam-toggle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  font-size: 8px;
+  white-space: nowrap;
+  touch-action: manipulation;
+}
+
+.deck-cam-toggle .ico {
+  font-size: 14px;
+}
+
+/* 下层操作区 */
+.deck-action-row {
+  margin-top: 6px;
+  flex: 1;
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.deck-actions {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  justify-content: space-between;
+}
+
+.deck-btn {
+  padding: 6px 8px;
+  font-size: 9px;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  touch-action: manipulation;
+}
+
+.deck-btn .ico {
+  font-size: 12px;
+}
+
+/* 蓄力拉杆 (Pullback Cue Stick) */
+.deck-cue-box {
+  width: 110px;
+  background: #0d0805;
+  border: 2px solid #4a2f1b;
+  box-shadow: inset 0 0 8px #000, 0 0 0 2px #000;
+  padding: 4px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  user-select: none;
+  touch-action: none;
+}
+
+.deck-cue-header {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  font-size: 8px;
+  color: var(--gold);
+}
+
+#deck-power-val {
+  color: #ff6a4a;
+  font-weight: bold;
+}
+
+.deck-cue-track {
+  position: relative;
+  width: 32px;
+  height: 90px;
+  background: repeating-linear-gradient(0deg, #120b07, #120b07 6px, #1a100a 6px, #1a100a 12px);
+  border: 2px solid #331e10;
+  box-shadow: inset 0 2px 6px #000;
+  border-radius: 4px;
+  cursor: pointer;
+  touch-action: none;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+}
+
+.deck-cue-stick {
+  position: absolute;
+  top: 2px;
+  width: 10px;
+  height: 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition: transform 0.05s ease-out;
+  pointer-events: none;
+}
+
+.deck-cue-tip {
+  width: 10px;
+  height: 4px;
+  background: #38b6ff;
+  border-radius: 2px 2px 0 0;
+}
+
+.deck-cue-shaft {
+  width: 6px;
+  height: 60px;
+  background: linear-gradient(90deg, #d4a373, #faedcd, #b07d50);
+}
+
+.deck-cue-butt {
+  width: 10px;
+  flex: 1;
+  background: linear-gradient(90deg, #3d2314, #5c3822, #26150b);
+  border-radius: 0 0 2px 2px;
+}
+
+.deck-cue-hint {
+  font-size: 7px;
+  color: var(--dim);
+  text-align: center;
+}
+
+/* 酒吧漫步导航模式 */
+.lounge-header {
+  text-align: center;
+  margin-bottom: 4px;
+}
+
+.lounge-title {
+  display: block;
+  font-size: 10px;
+  color: var(--gold);
+}
+
+.lounge-sub {
+  font-size: 8px;
+  color: var(--dim);
+}
+
+.lounge-venues {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  flex: 1;
+}
+
+.lounge-vcard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  gap: 2px;
+  touch-action: manipulation;
+}
+
+.lounge-vcard .vico {
+  font-size: 16px;
+}
+
+.lounge-vcard .vtitle {
+  font-size: 8px;
+}
+
+.lounge-vcard.active {
+  background: #2a2008;
+  color: var(--gold);
+  box-shadow: inset 0 0 0 2px var(--gold);
+}
+
+.lounge-action-bar {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.lounge-enter-btn {
+  flex: 1;
+  padding: 10px;
+  font-size: 11px;
+  color: var(--gold);
+  background: #2a1b12;
+  border-color: var(--gold);
+  touch-action: manipulation;
+}
+
+.lounge-enter-btn.ready {
+  background: var(--gold);
+  color: #120a06;
+  box-shadow: 0 0 12px var(--gold);
+}
+
+.lounge-view-btn {
+  padding: 8px 12px;
+  font-size: 9px;
+  touch-action: manipulation;
+}
+
+/* ---------------------------------------------------------------- 飞行棋 (Ludo Club 3D 棋桌体验) */
+#ludo-ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  display: block;      /* HUD 层，不是弹窗：不要继承弹窗的 flex 居中与暗色背景 */
+  background: none;
+}
+
+#ludo-chips {
+  position: absolute;
+  left: 22px;
+  top: 22px;
+  color: var(--gold);
+  font-size: 13px;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+
+#ludo-chips .chip {
+  color: #ff6a4a;
+}
+
+#ludo-turn-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.ludo-turn-badge {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: 0 0 6px #000;
+}
+
+/* 3D 棋子浮动微标（Projected Tags） */
+.ltag {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  min-width: 44px;
+  text-align: center;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: bold;
+  color: #120a06;
+  background: var(--gold);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 3px #000, 0 0 16px rgba(255, 204, 0, 0.85);
+  pointer-events: auto;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  animation: ludoTagPulse 0.7s infinite alternate;
+}
+
+.ltag:hover {
+  transform: translate(-50%, -108%) scale(1.12);
+  background: #fff066;
+}
+
+@keyframes ludoTagPulse {
+  0% { transform: translate(-50%, -100%) scale(1); box-shadow: 0 0 0 3px #000, 0 0 10px rgba(255, 204, 0, 0.6); }
+  100% { transform: translate(-50%, -105%) scale(1.08); box-shadow: 0 0 0 3px #000, 0 0 20px rgba(255, 204, 0, 1.0); }
+}
+
+#ludo-hud-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  min-width: min(450px, 92vw);
+  pointer-events: auto;
+}
+
+.ludo-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.ludo-big-roll {
+  flex: 1;
+  padding: 10px 18px;
+  font-size: 13px;
+  background: #3a2214;
+  border-color: var(--gold);
+  color: var(--gold);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.ludo-big-roll:hover:not(:disabled) {
+  background: #50311e;
+}
+
+.ludo-big-roll:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ludo-dice-badge {
+  font-size: 24px;
+  color: var(--gold);
+  background: #140d09;
+  border: 2px solid var(--gold);
+  padding: 3px 12px;
+  box-shadow: 0 0 10px rgba(255, 204, 0, 0.5);
+  min-width: 50px;
+  text-align: center;
+}
+
+.ludo-options-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  gap: 8px;
+}
+
+.ludo-modes-group {
+  display: flex;
+  gap: 6px;
+}
+
+.ludo-modes-group .btn.on {
+  background: var(--gold);
+  color: #1a1200;
+  font-weight: bold;
+}
+
+.ludo-hint {
+  font-size: 9px;
+  color: var(--dim);
+  text-align: center;
+}
+
+#ludo-result {
+  position: absolute;
+  left: 50%;
+  top: 36%;
+  transform: translateX(-50%);
+  text-align: center;
+  min-width: 320px;
+  padding: 20px 28px;
+  pointer-events: auto;
+  animation: pop .24s steps(4);
+}
+
+#ludo-result .big {
+  font-size: 24px;
+  text-shadow: 3px 3px 0 #000;
+  margin-bottom: 8px;
+}
+
+#ludo-result.win .big {
+  color: var(--gold);
+}
+
+#ludo-result.lose .big {
+  color: #ff6a5a;
+}
+
+#ludo-result .desc {
+  font-size: 12px;
+  color: var(--text);
+  margin-bottom: 14px;
+  line-height: 1.5;
 }

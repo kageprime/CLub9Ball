@@ -62,6 +62,113 @@
   <div id="spectate" hidden data-i18n="spectate.label"></div>
 </div>
 
+<!-- 移动端街机触控面板 -->
+<div id="mobile-deck" hidden>
+  <!-- 1. 击球操作面板 (瞄准/出杆) -->
+  <div id="deck-aim-view">
+    <div class="deck-row deck-controls-row">
+      <div id="deck-spin-box" title="Spin">
+        <canvas id="deck-spin-canvas" width="46" height="46"></canvas>
+        <div class="deck-lbl" data-i18n="deck.spin">SPIN</div>
+      </div>
+      <div class="deck-aim-group">
+        <div class="deck-aim-head">
+          <span class="deck-lbl" data-i18n="deck.fine">FINE AIM</span>
+          <span id="deck-aim-val">0.0°</span>
+        </div>
+        <div class="deck-btn-strip">
+          <button class="btn small deck-jog" id="deck-jog-ll">◀◀</button>
+          <button class="btn small deck-jog" id="deck-jog-l">◀</button>
+          <button class="btn small deck-jog" id="deck-jog-r">▶</button>
+          <button class="btn small deck-jog" id="deck-jog-rr">▶▶</button>
+        </div>
+      </div>
+      <button class="btn small deck-cam-toggle" id="deck-cam-btn">
+        <span class="ico">📹</span>
+        <span id="deck-cam-name">BEHIND</span>
+      </button>
+    </div>
+
+    <div class="deck-row deck-action-row">
+      <div class="deck-actions">
+        <button class="btn deck-btn" id="deck-btn-aimline">
+          <span class="ico">🎯</span>
+          <span data-i18n="deck.aimline">Aim</span>: <b id="deck-aimline-state">ON</b>
+        </button>
+        <button class="btn deck-btn" id="deck-btn-stand">
+          <span class="ico">🚶</span>
+          <span data-i18n="deck.stand">Stand Up</span>
+        </button>
+        <button class="btn deck-btn" id="deck-btn-free">
+          <span class="ico">⚪</span>
+          <span data-i18n="hud.freeBall">Free Ball</span>
+        </button>
+      </div>
+
+      <div class="deck-cue-box" id="deck-cue-box">
+        <div class="deck-cue-header">
+          <span data-i18n="deck.pull">PULL CUE</span>
+          <span id="deck-power-val">50%</span>
+        </div>
+        <div class="deck-cue-track" id="deck-cue-track">
+          <div class="deck-cue-stick" id="deck-cue-stick">
+            <div class="deck-cue-tip"></div>
+            <div class="deck-cue-shaft"></div>
+            <div class="deck-cue-butt"></div>
+          </div>
+        </div>
+        <div class="deck-cue-hint" data-i18n="deck.release">RELEASE TO SHOOT</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. 酒吧漫步导航面板 (站起/移动) -->
+  <div id="deck-lounge-view" hidden>
+    <div class="lounge-header">
+      <span class="lounge-title" data-i18n="deck.lounge">CLUB No.9 LOUNGE</span>
+      <span class="lounge-sub" id="lounge-near-status">Swipe upper screen to look</span>
+    </div>
+    <div class="lounge-venues" id="lounge-venues">
+      <button class="btn lounge-vcard" data-venue="pool">
+        <span class="vico">🎱</span>
+        <span class="vtitle">Pool</span>
+      </button>
+      <button class="btn lounge-vcard" data-venue="darts">
+        <span class="vico">🎯</span>
+        <span class="vtitle">Darts</span>
+      </button>
+      <button class="btn lounge-vcard" data-venue="dice">
+        <span class="vico">🎲</span>
+        <span class="vtitle">Dice</span>
+      </button>
+      <button class="btn lounge-vcard" data-venue="ludo">
+        <span class="vico">✈️</span>
+        <span class="vtitle">Ludo</span>
+      </button>
+      <button class="btn lounge-vcard" data-venue="chess">
+        <span class="vico">♟️</span>
+        <span class="vtitle">Chess</span>
+      </button>
+      <button class="btn lounge-vcard" data-venue="roulette">
+        <span class="vico">🔫</span>
+        <span class="vtitle">Roulette</span>
+      </button>
+      <button class="btn lounge-vcard" data-venue="drink">
+        <span class="vico">🍸</span>
+        <span class="vtitle">Bar</span>
+      </button>
+    </div>
+    <div class="lounge-action-bar">
+      <button class="btn big lounge-enter-btn" id="lounge-btn-enter">
+        <span data-i18n="deck.enter">ENTER / PLAY</span>
+      </button>
+      <button class="btn lounge-view-btn" id="deck-btn-avatar">
+        <span>👤 3rd/1st</span>
+      </button>
+    </div>
+  </div>
+</div>
+
 <div id="msg" class="panel" hidden></div>
 <div id="prompt" class="panel" hidden></div>
 <div id="achtoast" class="panel" hidden></div>
@@ -144,6 +251,10 @@
     <div class="modes" data-modes></div>
     <div class="diffrow" data-diffs></div>
   </div>
+  <div id="start-venue" hidden>
+    <div class="venue-label" data-i18n="venue.start"></div>
+    <div class="venue-grid" data-venues></div>
+  </div>
   <div class="start-btn-row" style="display:flex;gap:8px;justify-content:center;align-items:center">
     <button class="btn big" id="btn-start" hidden data-i18n="start.click"></button>
     <button class="btn big" id="btn-customize" hidden style="background:#5a4a3a">👤 Avatar</button>
@@ -160,11 +271,22 @@
     <div class="pz-label" data-i18n="pause.mode"></div>
     <div class="modes compact" data-modes></div>
     <div class="diffrow" data-diffs></div>
+    <div class="pz-label" data-i18n="pause.games"></div>
+    <div class="venue-grid" data-venues></div>
     <button class="btn" id="pz-customize">👤 Customize Avatar</button>
     <button class="btn" id="pz-net" data-i18n="net.btn">Multiplayer</button>
     <button class="btn" id="pz-settings" data-i18n="hud.settings"></button>
     <button class="btn" id="pz-about" data-i18n="settings.about"></button>
     <button class="btn" id="pz-quit" data-i18n="pause.quit"></button>
+  </div>
+</div>
+
+<!-- 小游戏直达面板（L） -->
+<div id="launcher" class="overlay" hidden>
+  <div class="panel menu launcher-panel">
+    <div class="pz-label" data-i18n="launcher.title"></div>
+    <div class="venue-grid" data-venues></div>
+    <div class="sub" data-i18n="launcher.hint"></div>
   </div>
 </div>
 
@@ -243,6 +365,35 @@
       <span class="chess-hint-text" data-i18n="chess.hint">Q / ESC: Stand Up · Tap or Drag Pieces to Move</span>
     </div>
   </div>
+</div>
+
+<!-- 飞行棋 (Ludo Club 3D 棋桌体验) -->
+<div id="ludo-ui" hidden>
+  <div id="ludo-chips" class="panel">
+    <span class="chip">●</span> <span id="ludo-pot">30 🪙</span> &nbsp;·&nbsp; <span id="ludo-turn-info"></span>
+  </div>
+  <div id="ludo-tags">
+    <div class="ltag" hidden></div>
+    <div class="ltag" hidden></div>
+    <div class="ltag" hidden></div>
+    <div class="ltag" hidden></div>
+  </div>
+  <div id="ludo-hud-bar" class="panel">
+    <div class="ludo-actions-row">
+      <button class="btn big ludo-big-roll" id="ludo-roll-btn" data-i18n="ludo.rollDice">🎲 Roll Dice [Space]</button>
+      <div id="ludo-dice-num" class="ludo-dice-badge">🎲</div>
+    </div>
+    <div class="ludo-options-row">
+      <div class="ludo-modes-group">
+        <button class="btn small on" id="ludo-mode-2p">2P Duel</button>
+        <button class="btn small" id="ludo-mode-4p">4P Royale</button>
+        <button class="btn small" id="ludo-quick-btn" data-i18n="ludo.quickMode">Quick Match (2 tokens)</button>
+      </div>
+      <button class="btn small alt" id="ludo-close-btn">✕ Stand Up [Q]</button>
+    </div>
+    <div class="ludo-hint" id="ludo-hint" data-i18n="ludo.rules">Roll 6 to launch · Land to capture · Exact roll home</div>
+  </div>
+  <div id="ludo-result" class="panel" hidden></div>
 </div>
 
 <!-- 多人联机同游大厅面板 -->

@@ -9,7 +9,7 @@ export const PICKUP_SPOTS = [
   { id: 'fireplace',    x: 0.5,  y: 0.85, z: 2.3,  value: 10 },
   { id: 'darts_side',   x: 1.3,  y: 0.85, z: 0.9,  value: 10 },
   { id: 'wine_shelf',   x: -2.2, y: 0.85, z: 2.2,  value: 10 },
-  { id: 'dice_corner',  x: 3.4,  y: 0.85, z: -2.3, value: 10 },
+  { id: 'dice_corner',  x: 3.4,  y: 0.85, z: -0.45, value: 10 },
   { id: 'chess_lounge', x: -2.8, y: 0.85, z: 0.9,  value: 10 },
 ];
 

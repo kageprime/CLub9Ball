@@ -45,11 +45,11 @@ export class World {
     const renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: false, powerPreference: 'high-performance' });
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.BasicShadowMap;     // 硬边阴影，贴合像素风
-    renderer.setClearColor(0x0c0806, 1);
+    renderer.setClearColor(0x18100c, 1);
     this.renderer = renderer;
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0x120a06, 7, 16);
+    this.scene.fog = new THREE.Fog(0x241812, 8, 22);
     this.camera = new THREE.PerspectiveCamera(68, 16 / 9, 0.03, 40);
 
     this._setupPost();
@@ -72,6 +72,7 @@ export class World {
     this._buildDiceProps();
     this._buildRevolver();
     this._buildChessLounge();
+    this._buildLudoProps();
     this._buildBarOrder();
     this._buildCoins();
     this._buildAvatars();
@@ -100,7 +101,7 @@ export class World {
     this.postMat = new THREE.ShaderMaterial({
       uniforms: {
         tDiffuse: { value: this.rt.texture },
-        uLevels: { value: 9.0 }, uDither: { value: 0.9 }, uExposure: { value: 1.25 },
+        uLevels: { value: 12.0 }, uDither: { value: 0.9 }, uExposure: { value: 1.25 },
         uFlash: { value: 0.0 }, uFlashColor: { value: new THREE.Color(1, 0.2, 0.1) },
       },
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
@@ -119,7 +120,7 @@ export class World {
           float b = (M[p.y * 4 + p.x] + 0.5) / 16.0 - 0.5;
           s = floor(s * uLevels + b * uDither + 0.5) / uLevels;   // 有序抖动 + 调色板量化
           vec2 q = vUv - 0.5;
-          s *= 1.0 - dot(q, q) * 0.85;                    // 暗角
+          s *= 1.0 - dot(q, q) * 0.35;                    // 柔和暗角
           s = mix(s, uFlashColor, uFlash);
           gl_FragColor = vec4(clamp(s, 0.0, 1.0), 1.0);
         }`,
@@ -131,8 +132,11 @@ export class World {
   setPixelHeight(h) { this.pixelHeight = Math.max(120, Math.min(540, Math.round(h))); this.resize(); }
 
   resize() {
+    const isMobilePortrait = document.body.classList.contains('mobile-portrait');
+    const deckEl = document.getElementById('mobile-deck');
+    const deckH = (isMobilePortrait && deckEl && !deckEl.hidden) ? (deckEl.offsetHeight || 280) : 0;
     const vw = Math.max(1, window.innerWidth || 16);
-    const vh = Math.max(1, window.innerHeight || 9);
+    const vh = Math.max(1, (window.innerHeight - deckH) || 9);
     // 整数倍放大：屏幕上的每个“像素”是 N×N 个物理像素，避免非整数拉伸造成的大小不一与抖动。
     // N 取“内部高度 vh/N 最接近 pixelHeight”的整数倍率（至少 1）。
     const t = this.pixelHeight;
@@ -181,8 +185,8 @@ export class World {
 
   // ---------- 灯光 ----------
   _buildLights() {
-    this.scene.add(new THREE.AmbientLight(0x6a4a38, 0.55));
-    this.scene.add(new THREE.HemisphereLight(0xffd7a8, 0x201208, 0.35));
+    this.scene.add(new THREE.AmbientLight(0x7a5a48, 0.70));
+    this.scene.add(new THREE.HemisphereLight(0xffe4c4, 0x281810, 0.45));
     this.lamps = [];
     for (const x of [-0.65, 0.65]) {
       const sp = new THREE.SpotLight(0xffe2b0, 55, 5.5, 0.62, 0.55, 1.4);
@@ -205,6 +209,10 @@ export class World {
     this.fireLight = new THREE.PointLight(0xff7a2a, 9, 6, 1.6);
     this.fireLight.position.set(1.4, 0.7, ROOM.z1 - 0.7);
     this.scene.add(this.fireLight);
+    // 休息区 / 棋牌角温暖补光
+    const loungeFill = new THREE.PointLight(0xffddb4, 4.5, 7.5, 1.4);
+    loungeFill.position.set(-2.8, 2.5, 0.5);
+    this.scene.add(loungeFill);
     // 霓虹补光
     const neon = (c, x, y, z, i) => { const l = new THREE.PointLight(c, i, 5, 1.8); l.position.set(x, y, z); this.scene.add(l); return l; };
     neon(0xff3fb0, ROOM.x1 - 0.5, 2.3, 0.4, 5);
@@ -232,7 +240,7 @@ export class World {
     }
     if (!env) env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     this.scene.environment = env;
-    this.scene.environmentIntensity = this.status.hdri === 'loaded' ? 0.55 : 0.25;
+    this.scene.environmentIntensity = this.status.hdri === 'loaded' ? 0.65 : 0.38;
     pmrem.dispose();
   }
 
@@ -447,41 +455,195 @@ export class World {
     g.rotation.x = -s.elev;
   }
 
-  // ---------- 瞄准线 ----------
+  // ---------- 瞄准线与粗体轨迹箭头 (Bold Ribbons & Arrows) ----------
+  _distToCushion(ox, oz, dx, dz, maxD = 1.35) {
+    const lx = HALF_L - BALL_R, lz = HALF_W - BALL_R;
+    let dist = maxD;
+    if (dx > 1e-6) dist = Math.min(dist, (lx - ox) / dx);
+    if (dx < -1e-6) dist = Math.min(dist, (-lx - ox) / dx);
+    if (dz > 1e-6) dist = Math.min(dist, (lz - oz) / dz);
+    if (dz < -1e-6) dist = Math.min(dist, (-lz - oz) / dz);
+    return Math.max(0.08, dist);
+  }
+
+  _buildArrowMesh(color, width = 0.016, withHead = true) {
+    const maxVerts = 16;
+    const geo = new THREE.BufferGeometry();
+    const pos = new Float32Array(maxVerts * 3);
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+
+    // 索引：至多 4 段四边形 (24 索引) + 1 个箭头三角形 (3 索引)
+    const indices = [];
+    for (let i = 0; i < 4; i++) {
+      const b = i * 2;
+      indices.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+    }
+    indices.push(8, 9, 10);
+    geo.setIndex(indices);
+    geo.setDrawRange(0, 0);
+
+    const mat = new THREE.MeshBasicMaterial({
+      color,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      toneMapped: false,
+      transparent: true,
+      opacity: 0.95,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.y = 0.0028;
+    mesh.visible = false;
+    mesh.frustumCulled = false;
+    this.pool.add(mesh);
+    return { mesh, width, withHead, geo, pos };
+  }
+
+  _updateRibbon(arrowObj, pts, customHeadLen = 0.045, customHeadW = 0.038) {
+    const { mesh, width, withHead, geo, pos } = arrowObj;
+    if (!pts || pts.length < 2) {
+      mesh.visible = false;
+      return;
+    }
+    const nPts = Math.min(pts.length, 5);
+    const halfW = width * 0.5;
+
+    let vertIdx = 0;
+    for (let i = 0; i < nPts; i++) {
+      let dx = 0, dz = 0;
+      if (i < nPts - 1) {
+        dx = pts[i + 1].x - pts[i].x;
+        dz = pts[i + 1].z - pts[i].z;
+      } else if (i > 0) {
+        dx = pts[i].x - pts[i - 1].x;
+        dz = pts[i].z - pts[i - 1].z;
+      }
+      const len = Math.hypot(dx, dz) || 1;
+      dx /= len; dz /= len;
+      const nx = -dz, nz = dx;
+
+      let px = pts[i].x, pz = pts[i].z;
+      if (withHead && i === nPts - 1) {
+        px -= dx * customHeadLen * 0.7;
+        pz -= dz * customHeadLen * 0.7;
+      }
+
+      pos[vertIdx * 3] = px + nx * halfW;
+      pos[vertIdx * 3 + 1] = 0;
+      pos[vertIdx * 3 + 2] = pz + nz * halfW;
+      vertIdx++;
+
+      pos[vertIdx * 3] = px - nx * halfW;
+      pos[vertIdx * 3 + 1] = 0;
+      pos[vertIdx * 3 + 2] = pz - nz * halfW;
+      vertIdx++;
+    }
+
+    let indexCount = (nPts - 1) * 6;
+
+    if (withHead && nPts >= 2) {
+      const lastP = pts[nPts - 1];
+      const prevP = pts[nPts - 2];
+      let dx = lastP.x - prevP.x, dz = lastP.z - prevP.z;
+      const len = Math.hypot(dx, dz) || 1;
+      dx /= len; dz /= len;
+      const nx = -dz, nz = dx;
+
+      const baseMidX = lastP.x - dx * customHeadLen;
+      const baseMidZ = lastP.z - dz * customHeadLen;
+      const wingW = customHeadW * 0.5;
+
+      pos[8 * 3] = baseMidX + nx * wingW;
+      pos[8 * 3 + 1] = 0;
+      pos[8 * 3 + 2] = baseMidZ + nz * wingW;
+
+      pos[9 * 3] = baseMidX - nx * wingW;
+      pos[9 * 3 + 1] = 0;
+      pos[9 * 3 + 2] = baseMidZ - nz * wingW;
+
+      pos[10 * 3] = lastP.x + dx * 0.005;
+      pos[10 * 3 + 1] = 0;
+      pos[10 * 3 + 2] = lastP.z + dz * 0.005;
+
+      indexCount += 3;
+    }
+
+    geo.attributes.position.needsUpdate = true;
+    geo.setDrawRange(0, indexCount);
+    mesh.visible = true;
+  }
+
   _buildAimLine() {
-    const mk = (color, dashed = true) => {
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(3 * 8), 3));
-      const mat = dashed ? new THREE.LineDashedMaterial({ color, dashSize: 0.02, gapSize: 0.016, toneMapped: false })
-        : new THREE.LineBasicMaterial({ color, toneMapped: false });
-      const l = new THREE.Line(geo, mat); l.frustumCulled = false; l.visible = false; l.position.y = 0.0015 + BALL_R;
-      this.pool.add(l); return l;
+    this.aim = {
+      main: this._buildArrowMesh(0x54e0ee, 0.012, false),
+      obj: this._buildArrowMesh(0xffcc00, 0.018, true),
+      cue: this._buildArrowMesh(0x38b6ff, 0.014, true),
+      ghost: null,
     };
-    this.aim = { main: mk(0xffffff), obj: mk(0xffd24a), cue: mk(0x9ad0ff), ghost: null };
-    const ring = new THREE.Mesh(new THREE.RingGeometry(BALL_R * 0.88, BALL_R, 20), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, toneMapped: false, side: THREE.DoubleSide }));
-    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.003; ring.visible = false; this.pool.add(ring); this.aim.ghost = ring;
+
+    // 幽灵球：外发光圈 + 半透明内盘 + 中心点
+    const ghostGroup = new THREE.Group();
+    ghostGroup.position.y = 0.0028;
+
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(BALL_R - 0.003, BALL_R + 0.002, 28),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, depthWrite: false, toneMapped: false, side: THREE.DoubleSide })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ghostGroup.add(ring);
+
+    const inner = new THREE.Mesh(
+      new THREE.CircleGeometry(BALL_R - 0.003, 24),
+      new THREE.MeshBasicMaterial({ color: 0x54e0ee, transparent: true, opacity: 0.35, depthWrite: false, toneMapped: false, side: THREE.DoubleSide })
+    );
+    inner.rotation.x = -Math.PI / 2;
+    ghostGroup.add(inner);
+
+    const dot = new THREE.Mesh(
+      new THREE.CircleGeometry(0.004, 12),
+      new THREE.MeshBasicMaterial({ color: 0xffcc00, depthWrite: false, toneMapped: false, side: THREE.DoubleSide })
+    );
+    dot.rotation.x = -Math.PI / 2;
+    ghostGroup.add(dot);
+
+    ghostGroup.visible = false;
+    this.pool.add(ghostGroup);
+    this.aim.ghost = ghostGroup;
   }
-  _setLine(l, pts) {
-    if (!pts || pts.length < 2) { l.visible = false; return; }
-    const a = l.geometry.attributes.position;
-    for (let i = 0; i < Math.min(pts.length, 8); i++) a.setXYZ(i, pts[i].x, 0, pts[i].z);
-    l.geometry.setDrawRange(0, Math.min(pts.length, 8));
-    a.needsUpdate = true; l.computeLineDistances(); l.visible = true;
-  }
+
   // trace：来自 sim.aimTrace / traceAim
   setAimLine(trace) {
-    if (!trace) { this.aim.main.visible = this.aim.obj.visible = this.aim.cue.visible = this.aim.ghost.visible = false; return; }
-    this._setLine(this.aim.main, trace.points);
+    if (!trace) {
+      this.aim.main.mesh.visible = false;
+      this.aim.obj.mesh.visible = false;
+      this.aim.cue.mesh.visible = false;
+      this.aim.ghost.visible = false;
+      return;
+    }
+    this._updateRibbon(this.aim.main, trace.points);
     const h = trace.hit;
     if (h) {
-      this.aim.ghost.visible = true; this.aim.ghost.position.x = h.ghost.x; this.aim.ghost.position.z = h.ghost.z;
-      const b = trace.points[trace.points.length - 1];
+      this.aim.ghost.visible = true;
+      this.aim.ghost.position.set(h.ghost.x, 0.0028, h.ghost.z);
+
       const ob = { x: h.ghost.x + h.objDir.x * 2 * BALL_R, z: h.ghost.z + h.objDir.z * 2 * BALL_R };
-      this._setLine(this.aim.obj, [ob, { x: ob.x + h.objDir.x * 0.3, z: ob.z + h.objDir.z * 0.3 }]);
+      const dist = this._distToCushion(ob.x, ob.z, h.objDir.x, h.objDir.z, 1.35);
+      const objEnd = { x: ob.x + h.objDir.x * dist, z: ob.z + h.objDir.z * dist };
+      this._updateRibbon(this.aim.obj, [ob, objEnd], 0.046, 0.038);
+
       const cl = Math.hypot(h.cueDir.x, h.cueDir.z);
-      if (cl > 1e-4) this._setLine(this.aim.cue, [b, { x: b.x + (h.cueDir.x / cl) * 0.18 * cl, z: b.z + (h.cueDir.z / cl) * 0.18 * cl }]);
-      else this.aim.cue.visible = false;
-    } else { this.aim.ghost.visible = false; this.aim.obj.visible = false; this.aim.cue.visible = false; }
+      if (cl > 1e-4) {
+        const cueDist = Math.max(0.2, Math.min(0.5, cl * 0.5));
+        const b = trace.points[trace.points.length - 1];
+        const cueEnd = { x: b.x + (h.cueDir.x / cl) * cueDist, z: b.z + (h.cueDir.z / cl) * cueDist };
+        this._updateRibbon(this.aim.cue, [b, cueEnd], 0.038, 0.032);
+      } else {
+        this.aim.cue.mesh.visible = false;
+      }
+    } else {
+      this.aim.ghost.visible = false;
+      this.aim.obj.mesh.visible = false;
+      this.aim.cue.mesh.visible = false;
+    }
   }
 
   // ---------- 飞镖道具 ----------
@@ -528,13 +690,21 @@ export class World {
   // ---------- 骰子桌（骰子扑克）----------
   // 圆桌 + 托盘（玩家的骰子抛在这里）+ 近端骰架（5 槽）+ 远端庄家骰排（5 颗，各扣一个骰盅）
   _buildDiceProps() {
-    const p = this.cfg?.props?.dice?.pos || [2.9, 0, -1.9];
+    const p = this.cfg?.props?.dice?.pos || [2.85, 0, -0.45];
     const g = new THREE.Group(); g.position.set(p[0], 0, p[2]); this.scene.add(g);
     this._cyl(0.55, 0.55, 0.06, this._mat(0x1c4a2a, { roughness: 0.9 }), 0, 1.0, 0, g, 24);
     this._cyl(0.58, 0.58, 0.04, this._wood(2, 1), 0, 0.97, 0, g, 24);
     this._cyl(0.06, 0.08, 0.95, this._mat(0x1a1a1a, { metalness: 0.5, roughness: 0.4 }), 0, 0.48, 0, g, 8);
     this._cyl(0.3, 0.32, 0.04, this._mat(0x1a1a1a), 0, 0.02, 0, g, 12);
-    for (const a of [0, 2.1, 4.2]) this._cyl(0.2, 0.2, 0.05, this._mat(0x6a1a14), Math.cos(a) * 0.9, 0.5, Math.sin(a) * 0.9, g, 10);
+    // 吧椅：庄家座位及客人座位
+    const stool = (sx, sz) => {
+      this._cyl(0.18, 0.18, 0.05, this._mat(0x6a1a14), sx, 0.5, sz, g, 12);
+      this._cyl(0.025, 0.025, 0.48, this._mat(0x1a1a1a, { metalness: 0.7 }), sx, 0.24, sz, g, 6);
+      this._cyl(0.15, 0.15, 0.02, this._mat(0x1a1a1a), sx, 0.01, sz, g, 10);
+    };
+    stool(0.62, 0);          // 庄家椅
+    stool(-0.68, -0.52);     // 客人椅 1
+    stool(-0.68, 0.52);      // 客人椅 2
     this.diceRoot = g;
     this.props.dice = { id: 'dice', pos: new V3(p[0], 1.0, p[2]), radius: 1.3, labelKey: 'bar.dice' };
 
@@ -755,6 +925,300 @@ export class World {
     this.props.chess = { id: 'chess', pos: new V3(cp[0], 0.8, cp[2]), radius: 1.35, labelKey: 'bar.chess' };
   }
 
+  // ---------- 飞行棋展桌（Ludo Club）----------
+  _buildLudoProps() {
+    const lp = this.cfg?.props?.ludo?.pos || [-2.85, 0, -0.45];
+    const g = new THREE.Group(); g.position.set(lp[0], 0, lp[2]); this.scene.add(g);
+    this.ludoTableGroup = g;
+
+    // 棋桌圆台面 (高 1.0m) 墨绿高级呢绒与胡桃木包边
+    this._cyl(0.55, 0.55, 0.06, this._mat(0x154e2d, { roughness: 0.85 }), 0, 1.0, 0, g, 24);
+    this._cyl(0.58, 0.58, 0.04, this._wood(2, 1), 0, 0.97, 0, g, 24);
+    this._cyl(0.06, 0.08, 0.95, this._mat(0x1a1a1a, { metalness: 0.5, roughness: 0.4 }), 0, 0.48, 0, g, 8);
+    this._cyl(0.3, 0.32, 0.04, this._mat(0x1a1a1a), 0, 0.02, 0, g, 12);
+
+    // 3D 飞行棋棋盘 (正方形 0.52m x 0.52m)
+    const boardG = new THREE.Group(); boardG.position.set(0, 1.032, 0); g.add(boardG);
+    this.ludoBoardGroup = boardG;
+
+    // 生成奢华程序化飞行棋盘纹理（高对比亮色棋盘）
+    const makeLudoBoardTexture = () => {
+      const c = document.createElement('canvas'); c.width = c.height = 1024;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#f3ecdd'; ctx.fillRect(0, 0, 1024, 1024);
+      const cs = 1024 / 15;
+
+      // 绘制所有公共白格底色与微细边线
+      for (let gy = 0; gy < 15; gy++) {
+        for (let gx = 0; gx < 15; gx++) {
+          const inYard = (gx < 6 && gy < 6) || (gx > 8 && gy < 6) || (gx > 8 && gy > 8) || (gx < 6 && gy > 8);
+          const inCenter = (gx >= 6 && gx <= 8 && gy >= 6 && gy <= 8);
+          if (!inYard && !inCenter) {
+            ctx.fillStyle = '#fbf7ee';
+            ctx.fillRect(gx * cs + 1.5, gy * cs + 1.5, cs - 3, cs - 3);
+          }
+        }
+      }
+
+      const qDefs = [
+        { c: '#ef4444', dark: '#991b1b', x0: 0, y0: 0, cx: 3 * cs, cy: 3 * cs, sx: [[1.8, 1.8], [4.2, 1.8], [1.8, 4.2], [4.2, 4.2]] },
+        { c: '#10b981', dark: '#065f46', x0: 9 * cs, y0: 0, cx: 12 * cs, cy: 3 * cs, sx: [[10.8, 1.8], [13.2, 1.8], [10.8, 4.2], [13.2, 4.2]] },
+        { c: '#f59e0b', dark: '#92400e', x0: 9 * cs, y0: 9 * cs, cx: 12 * cs, cy: 12 * cs, sx: [[10.8, 10.8], [13.2, 10.8], [10.8, 13.2], [13.2, 13.2]] },
+        { c: '#3b82f6', dark: '#1e40af', x0: 0, y0: 9 * cs, cx: 3 * cs, cy: 12 * cs, sx: [[1.8, 10.8], [4.2, 10.8], [1.8, 13.2], [4.2, 13.2]] },
+      ];
+
+      // 四色家园大基地
+      for (const q of qDefs) {
+        ctx.fillStyle = q.c;
+        ctx.fillRect(q.x0, q.y0, 6 * cs, 6 * cs);
+        ctx.fillStyle = '#f7f1e4';
+        ctx.beginPath(); ctx.arc(q.cx, q.cy, 2.2 * cs, 0, Math.PI * 2); ctx.fill();
+        for (const [px, py] of q.sx) {
+          ctx.beginPath(); ctx.arc(px * cs, py * cs, 0.62 * cs, 0, Math.PI * 2);
+          ctx.fillStyle = '#fbbf24'; ctx.fill();
+          ctx.beginPath(); ctx.arc(px * cs, py * cs, 0.48 * cs, 0, Math.PI * 2);
+          ctx.fillStyle = q.dark; ctx.fill();
+        }
+      }
+
+      // 公共网格线
+      ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 2.5;
+      for (let i = 0; i <= 15; i++) {
+        if (i >= 6 && i <= 9) {
+          ctx.beginPath(); ctx.moveTo(i * cs, 0); ctx.lineTo(i * cs, 1024); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(0, i * cs); ctx.lineTo(1024, i * cs); ctx.stroke();
+        }
+      }
+
+      // 家园冲刺道 (Home stretches)
+      const fillTiles = (tiles, col) => {
+        ctx.fillStyle = col;
+        for (const [gx, gy] of tiles) {
+          ctx.fillRect(gx * cs + 1.5, gy * cs + 1.5, cs - 3, cs - 3);
+        }
+      };
+      fillTiles([[7, 1], [7, 2], [7, 3], [7, 4], [7, 5]], '#ef4444');
+      fillTiles([[13, 7], [12, 7], [11, 7], [10, 7], [9, 7]], '#10b981');
+      fillTiles([[7, 13], [7, 12], [7, 11], [7, 10], [7, 9]], '#f59e0b');
+      fillTiles([[1, 7], [2, 7], [3, 7], [4, 7], [5, 7]], '#3b82f6');
+
+      // 起跑起点格与方向箭头
+      const starts = [
+        { gx: 6, gy: 1, c: '#ef4444', dir: [0, 1] },
+        { gx: 13, gy: 6, c: '#10b981', dir: [-1, 0] },
+        { gx: 8, gy: 13, c: '#f59e0b', dir: [0, -1] },
+        { gx: 1, gy: 8, c: '#3b82f6', dir: [1, 0] },
+      ];
+      for (const s of starts) {
+        ctx.fillStyle = s.c;
+        ctx.fillRect(s.gx * cs + 1.5, s.gy * cs + 1.5, cs - 3, cs - 3);
+        ctx.fillStyle = '#ffffff';
+        const cx = (s.gx + 0.5) * cs, cy = (s.gy + 0.5) * cs;
+        ctx.beginPath();
+        if (s.dir[0] === 1) { ctx.moveTo(cx - 10, cy - 10); ctx.lineTo(cx + 12, cy); ctx.lineTo(cx - 10, cy + 10); }
+        else if (s.dir[0] === -1) { ctx.moveTo(cx + 10, cy - 10); ctx.lineTo(cx - 12, cy); ctx.lineTo(cx + 10, cy + 10); }
+        else if (s.dir[1] === 1) { ctx.moveTo(cx - 10, cy - 10); ctx.lineTo(cx, cy + 12); ctx.lineTo(cx + 10, cy - 10); }
+        else { ctx.moveTo(cx - 10, cy + 10); ctx.lineTo(cx, cy - 12); ctx.lineTo(cx + 10, cy + 10); }
+        ctx.closePath(); ctx.fill();
+      }
+
+      // 安全金星格 (Safe stars: 0, 8, 13, 21, 26, 34, 39, 47)
+      const starTiles = [[8, 5], [9, 8], [6, 9], [5, 6]];
+      for (const [gx, gy] of starTiles) {
+        ctx.fillStyle = '#fef3c7'; ctx.fillRect(gx * cs + 1.5, gy * cs + 1.5, cs - 3, cs - 3);
+        ctx.fillStyle = '#d97706';
+        const cx = (gx + 0.5) * cs, cy = (gy + 0.5) * cs, rOut = cs * 0.32, rIn = cs * 0.14;
+        ctx.beginPath();
+        for (let i = 0; i < 5; i++) {
+          const a1 = (i * 72 - 90) * Math.PI / 180, a2 = (i * 72 + 36 - 90) * Math.PI / 180;
+          if (i === 0) ctx.moveTo(cx + Math.cos(a1) * rOut, cy + Math.sin(a1) * rOut);
+          else ctx.lineTo(cx + Math.cos(a1) * rOut, cy + Math.sin(a1) * rOut);
+          ctx.lineTo(cx + Math.cos(a2) * rIn, cy + Math.sin(a2) * rIn);
+        }
+        ctx.closePath(); ctx.fill();
+      }
+
+      // 中心四色三角汇聚区
+      const mid = 512;
+      const tris = [
+        { c: '#ef4444', p1: [6 * cs, 6 * cs], p2: [9 * cs, 6 * cs] },
+        { c: '#10b981', p1: [9 * cs, 6 * cs], p2: [9 * cs, 9 * cs] },
+        { c: '#f59e0b', p1: [9 * cs, 9 * cs], p2: [6 * cs, 9 * cs] },
+        { c: '#3b82f6', p1: [6 * cs, 9 * cs], p2: [6 * cs, 6 * cs] },
+      ];
+      for (const tr of tris) {
+        ctx.fillStyle = tr.c;
+        ctx.beginPath(); ctx.moveTo(tr.p1[0], tr.p1[1]); ctx.lineTo(tr.p2[0], tr.p2[1]); ctx.lineTo(mid, mid); ctx.closePath(); ctx.fill();
+      }
+
+      // 中心骰盅托盘底
+      ctx.beginPath(); ctx.arc(mid, mid, 1.15 * cs, 0, Math.PI * 2);
+      ctx.fillStyle = '#1e120a'; ctx.fill();
+      ctx.lineWidth = 6; ctx.strokeStyle = '#f59e0b'; ctx.stroke();
+
+      const t = new THREE.CanvasTexture(c);
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.magFilter = THREE.LinearFilter;
+      t.minFilter = THREE.LinearMipmapLinearFilter;
+      t.generateMipmaps = true;
+      return t;
+    };
+
+    const boardTex = makeLudoBoardTexture();
+    const borderMat = this._wood(1, 1);
+    this._box(0.54, 0.016, 0.54, borderMat, 0, 0, 0, boardG);
+    const boardMat = new THREE.MeshStandardMaterial({
+      map: boardTex,
+      roughness: 0.18,
+      metalness: 0.04,
+      emissive: 0xffffff,
+      emissiveMap: boardTex,
+      emissiveIntensity: 0.30,
+    });
+    const boardMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.52, 0.52), boardMat);
+    boardMesh.rotation.x = -Math.PI / 2; boardMesh.position.y = 0.0085; boardMesh.receiveShadow = false; boardG.add(boardMesh);
+
+    // 中心微型掷骰木托盘
+    this._cyl(0.062, 0.062, 0.008, borderMat, 0, 0.012, 0, boardG, 24);
+    this._cyl(0.056, 0.056, 0.003, this._mat(0x1a0f08, { roughness: 0.95 }), 0, 0.015, 0, boardG, 24);
+
+    // 3D 飞行棋中心骰子（自发光防暗色）
+    const pipTex = (n) => {
+      const c = document.createElement('canvas'); c.width = c.height = 48; const x = c.getContext('2d');
+      x.fillStyle = '#ffffff'; x.fillRect(0, 0, 48, 48);
+      x.fillStyle = n === 1 ? '#ef4444' : '#1e1e1e';
+      const a = 12, m = 24, b = 36;
+      const P = { 1: [[m, m]], 2: [[a, a], [b, b]], 3: [[a, a], [m, m], [b, b]], 4: [[a, a], [b, a], [a, b], [b, b]], 5: [[a, a], [b, a], [m, m], [a, b], [b, b]], 6: [[a, a], [b, a], [a, m], [b, m], [a, b], [b, b]] };
+      for (const [px, py] of P[n]) { x.beginPath(); x.arc(px, py, n === 1 ? 6.5 : 4.4, 0, Math.PI * 2); x.fill(); }
+      const t = new THREE.CanvasTexture(c); t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; t.colorSpace = THREE.SRGBColorSpace; return t;
+    };
+    const faceNums = [2, 5, 1, 6, 3, 4]; // +x -x +y -y +z -z
+    const dieMats = faceNums.map(n => {
+      const tex = pipTex(n);
+      return new THREE.MeshStandardMaterial({
+        map: tex,
+        roughness: 0.2,
+        metalness: 0.05,
+        emissive: 0xffffff,
+        emissiveMap: tex,
+        emissiveIntensity: 0.26,
+      });
+    });
+    this.ludoDie = new THREE.Mesh(new RoundedBoxGeometry(0.034, 0.034, 0.034, 2, 0.004), dieMats);
+    this.ludoDie.position.set(0, 0.032, 0); this.ludoDie.castShadow = true; boardG.add(this.ludoDie);
+
+    // 16 枚精致 3D 飞行棋棋子 (4 玩家 x 4 棋子)
+    const qCols = [0xef4444, 0x10b981, 0xf59e0b, 0x3b82f6];
+    this.ludoTokens = { 0: [], 1: [], 2: [], 3: [] };
+    const pawnGeoBase = new THREE.CylinderGeometry(0.012, 0.014, 0.006, 16);
+    const pawnGeoBody = new THREE.CylinderGeometry(0.0065, 0.011, 0.018, 16);
+    const pawnGeoHead = new THREE.SphereGeometry(0.008, 16, 12);
+    const haloGeo = new THREE.RingGeometry(0.013, 0.019, 20);
+
+    for (let p = 0; p < 4; p++) {
+      const pMat = new THREE.MeshStandardMaterial({
+        color: qCols[p],
+        roughness: 0.22,
+        metalness: 0.2,
+        emissive: qCols[p],
+        emissiveIntensity: 0.22,
+      });
+      const haloMat = new THREE.MeshBasicMaterial({ color: 0xfff066, side: THREE.DoubleSide, transparent: true, opacity: 0.95 });
+      for (let i = 0; i < 4; i++) {
+        const tg = new THREE.Group();
+        const base = new THREE.Mesh(pawnGeoBase, pMat); base.position.y = 0.003; base.castShadow = true; base.receiveShadow = false; tg.add(base);
+        const body = new THREE.Mesh(pawnGeoBody, pMat); body.position.y = 0.013; body.castShadow = true; tg.add(body);
+        const head = new THREE.Mesh(pawnGeoHead, pMat); head.position.y = 0.024; head.castShadow = true; tg.add(head);
+        const halo = new THREE.Mesh(haloGeo, haloMat.clone()); halo.rotation.x = -Math.PI / 2; halo.position.y = 0.001; halo.visible = false; tg.add(halo);
+        tg.userData = { player: p, token: i, halo };
+        tg.position.set(0, 0.0085, 0);
+        boardG.add(tg);
+        this.ludoTokens[p].push(tg);
+      }
+    }
+
+    // 四色吧椅围绕飞行棋桌 (红绿黄蓝)
+    const stool = (sx, sz, col = 0x18446a) => {
+      this._cyl(0.18, 0.18, 0.05, this._mat(col, { roughness: 0.6 }), sx, 0.5, sz, g, 14);
+      this._cyl(0.025, 0.025, 0.48, this._mat(0x1a1a1a, { metalness: 0.7 }), sx, 0.24, sz, g, 6);
+      this._cyl(0.15, 0.15, 0.02, this._mat(0x1a1a1a), sx, 0.01, sz, g, 10);
+    };
+    stool(0, 0.65, 0x991b1b);    // 红色玩家椅 (近端 +z)
+    stool(0, -0.65, 0x065f46);   // 绿色对手椅 (远端 -z)
+    stool(0.65, 0, 0x92400e);    // 黄色对手椅 (+x)
+    stool(-0.65, 0, 0x1e40af);   // 蓝色对手椅 (-x)
+
+    // 棋桌正上方垂直投射高亮暖白聚光灯与环境暖光
+    const lampG = new THREE.Group(); lampG.position.set(lp[0], 2.3, lp[2]); this.scene.add(lampG);
+    this._cyl(0.16, 0.08, 0.12, this._mat(0x222222, { metalness: 0.7 }), 0, 0, 0, lampG, 12);
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), new THREE.MeshBasicMaterial({ color: 0xfff4dc }));
+    bulb.position.y = -0.04; lampG.add(bulb);
+    const ludoBulbLight = new THREE.PointLight(0xfff4dc, 8, 4.0, 1.2);
+    ludoBulbLight.position.set(lp[0], 2.2, lp[2]); this.scene.add(ludoBulbLight);
+    this.ludoBulbLight = ludoBulbLight;
+
+    const sp = new THREE.SpotLight(0xfff6e6, 25, 4.2, 0.85, 0.35, 1.2);
+    sp.position.set(lp[0], 2.2, lp[2]); sp.target.position.set(lp[0], 1.03, lp[2]);
+    sp.castShadow = false;
+    this.scene.add(sp, sp.target);
+    this.ludoLamp = sp;
+
+    g.updateMatrixWorld(true);
+    boardG.updateMatrixWorld(true);
+
+    this.props.ludo = { id: 'ludo', pos: new V3(lp[0], 1.0, lp[2]), radius: 1.3, labelKey: 'bar.ludo' };
+  }
+
+  // ---------- 飞行棋 3D 坐标转换与交互 API ----------
+  ludoLocal(x, y, z) {
+    if (this.ludoBoardGroup) return this.ludoBoardGroup.localToWorld(new V3(x, y, z));
+    const lp = this.cfg?.props?.ludo?.pos || [-2.85, 1.032, -0.45];
+    return new V3(lp[0] + x, lp[1] + y, lp[2] + z);
+  }
+  setLudoActive(on) {
+    if (this.ludoLamp) this.ludoLamp.intensity = on ? 38 : 25;
+    if (this.ludoBulbLight) this.ludoBulbLight.intensity = on ? 12 : 8;
+  }
+  ludoGridToLocal(gx, gz, y = 0.0085) {
+    const s = 0.52 / 15;
+    return new THREE.Vector3((gx - 7) * s, y, (gz - 7) * s);
+  }
+  setLudoTokenPos(pIdx, tIdx, x, y, z) {
+    const tok = this.ludoTokens[pIdx]?.[tIdx];
+    if (tok) tok.position.set(x, y, z);
+  }
+  setLudoTokenVisible(pIdx, tIdx, visible) {
+    const tok = this.ludoTokens[pIdx]?.[tIdx];
+    if (tok) tok.visible = visible;
+  }
+  setLudoTokenGlow(pIdx, tIdx, active) {
+    const tok = this.ludoTokens[pIdx]?.[tIdx];
+    if (tok?.userData?.halo) tok.userData.halo.visible = active;
+  }
+  setLudoDie(face, x, y, z, qx, qy, qz, qw) {
+    if (!this.ludoDie) return;
+    this.ludoDie.position.set(x, y, z);
+    this.ludoDie.quaternion.set(qx, qy, qz, qw);
+  }
+  raycastLudoToken(screenX, screenY) {
+    if (!this.camera || !this.ludoTokens) return null;
+    const rct = this.canvas.getBoundingClientRect();
+    const mouse = new THREE.Vector2(((screenX - rct.left) / rct.width) * 2 - 1, -((screenY - rct.top) / rct.height) * 2 + 1);
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(mouse, this.camera);
+    const meshes = [];
+    for (const p of [0, 1, 2, 3]) {
+      for (const tok of this.ludoTokens[p] || []) {
+        if (tok.visible) meshes.push(...tok.children);
+      }
+    }
+    const hits = ray.intersectObjects(meshes, true);
+    if (!hits.length) return null;
+    let curr = hits[0].object;
+    while (curr && (!curr.userData || curr.userData.player === undefined)) curr = curr.parent;
+    return curr?.userData || null;
+  }
+
   // ---------- 吧台点酒交互 ----------
   _buildBarOrder() {
     const p = [-0.6, 1.11, ROOM.z0 + 0.82];
@@ -820,7 +1284,7 @@ export class World {
 
     // 默认 NPC 站位与待机动画
     if (this.avatars.dealer && this.diceTrayGroup) {
-      this.avatars.dealer.setPosition(3.55, 0, -1.9);
+      this.avatars.dealer.setPosition(3.48, 0, -0.45);
       this.avatars.dealer.setRotation(Math.PI);
       this.avatars.dealer.play('sit_idle');
     }
