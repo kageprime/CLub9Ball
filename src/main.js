@@ -17,7 +17,7 @@ import { Chips, Roulette } from './bar.js';
 import { createPokerDice } from './pokerdice.js';
 import { createLudoMini } from './ludo.js';
 import { pickShot, pickPlacement, legalTargets } from './ai.js';
-import { CameraRig, CAMS, CAM_KEYS } from './cameras.js';
+import { CameraRig, CAMS, CAM_KEYS, computeIsoCam, isoBasis } from './cameras.js';
 import { mulberry32 } from './rng.js';
 import { initLang, setLang, getLang, onLang, t, applyDom } from './i18n.js';
 import { BALL_R, HALF_L, HALF_W, POCKETS, colorOf, groupOf } from './table.js';
@@ -46,16 +46,15 @@ const DIFF = {
 const G = {
   started: false, paused: false, spectate: false, opp: 'cpu', touch: false,
   mode: 'walk',
-  thirdPerson: false,
   avatarsEnabled: true,
   player: { x: -2.3, z: 0, yaw: 0, pitch: -0.15 },
   aim: { angle: 0, power: 0.5, sx: 0, sy: 0, charging: false },
   cursor: { x: 0, y: 0 },  // 虚拟光标（NDC），自由球与飞镖用
-  settings: { closeup: true, aimline: true, volume: 0.8, pixel: 360, mode: 'cpu', diff: 'normal', cam: 'auto', startVenue: 'pool', ...store.get('settings', {}) },
+  settings: { closeup: true, aimline: true, volume: 0.8, pixel: 360, mode: 'cpu', diff: 'normal', cam: 'auto', theme: 'neon', startVenue: 'pool', ...store.get('settings', {}) },
   achieved: new Set(store.get('ach', [])),
   match: null, potted: [[], []], stats: null,
   lastShot: null, replay: null, closeup: null, rollCam: null,
-  keys: new Set(), msgTimer: 0, nearProp: null,
+  keys: new Set(), msgTimer: 0, nearProp: null, isoHover: null, moveTarget: null,
   wasBreak: false, shotStartMatch: null, endTimer: null,
   camAngle: 0, lastCue: null, cueVel: { x: 0, z: 0 }, dt: 0.016, lamps: true, lastTurn: -1,
 };
@@ -458,6 +457,10 @@ function quitToMenu() {
   $('over').hidden = true; $('replay').hidden = true; $('prompt').hidden = true;
   document.exitPointerLock?.();
   document.body.classList.remove('free', 'in-mini', 'spectating');
+  G.isoHover = null; G.moveTarget = null;   // 回主菜单：收掉俯视导航标记并退回透视相机
+  world.hideIsoRing('hover'); world.hideIsoRing('move');
+  world.setIso(false);
+  canvas.style.cursor = '';
   world.setCue({ visible: false }); world.setAimLine(null);
   setReticle(false); G.closeup = null;
   sim.rerack();
@@ -506,32 +509,51 @@ function walkCollide(p) {
 
 function updateWalk(dt) {
   const P = G.player, k = G.keys;
+  const iso = clubIso();
   const f = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0);
   const s = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0);
   const sp = (k.has('ShiftLeft') ? 3.0 : 1.7) * dt;
   const isMoving = f !== 0 || s !== 0;
   if (isMoving) {
-    const fx = Math.cos(P.yaw), fz = Math.sin(P.yaw), rx = -fz, rz = fx;
+    G.moveTarget = null; world.hideIsoRing('move');
     const l = Math.hypot(f, s);
-    P.x += ((fx * f + rx * s) / l) * sp; P.z += ((fz * f + rz * s) / l) * sp;
+    let dx, dz;
+    if (iso) {
+      // 俯视：WASD 相对屏幕方向（W 朝屏幕上方）
+      const b = isoBasis();
+      dx = (b.fx * f + b.rx * s) / l; dz = (b.fz * f + b.rz * s) / l;
+    } else {
+      const fx = Math.cos(P.yaw), fz = Math.sin(P.yaw), rx = -fz, rz = fx;
+      dx = (fx * f + rx * s) / l; dz = (fz * f + rz * s) / l;
+    }
+    P.x += dx * sp; P.z += dz * sp;
     walkCollide(P);
+    if (iso) P.yaw = Math.atan2(dz, dx);   // 转向移动方向
+  } else if (iso && G.moveTarget) {
+    // 点击地面行走
+    const tx = G.moveTarget.x - P.x, tz = G.moveTarget.z - P.z;
+    const d = Math.hypot(tx, tz);
+    if (d < 0.06) { G.moveTarget = null; world.hideIsoRing('move'); }
+    else {
+      const step = Math.min(sp, d);
+      P.x += (tx / d) * step; P.z += (tz / d) * step;
+      walkCollide(P);
+      P.yaw = Math.atan2(tz, tx);
+    }
   }
+  const moving = isMoving || (iso && !!G.moveTarget);
   if (G.avatarsEnabled) {
     world.setPlayerAvatar({
       x: P.x, z: P.z, yaw: P.yaw,
-      action: isMoving ? 'walk' : 'idle',
-      visible: !!G.thirdPerson,
+      action: moving ? 'walk' : 'idle',
+      visible: true,   // 俯视漫步始终看到自己的小人
     });
   }
-  if (G.thirdPerson) {
-    const res = rig.compute('thirdPerson', false, { player: P, dt });
-    world.setCameraTarget(res.pos, res.look, { fov: res.fov, k: res.k });
-  } else {
-    const eye = new THREE.Vector3(P.x, 1.65, P.z);
-    const look = eye.clone().add(new THREE.Vector3(Math.cos(P.yaw) * Math.cos(P.pitch), Math.sin(P.pitch), Math.sin(P.yaw) * Math.cos(P.pitch)));
-    world.setCameraTarget(eye, look, { fov: 68, k: 40 });
+  if (iso) {
+    const res = computeIsoCam({ x: P.x, z: P.z, aspect: world?.camera?.aspect || 16 / 9 });
+    world.setIsoCameraTarget(res.pos, res.look, { view: res.view, k: res.k });
   }
-  // 酒吧道具提示
+  // 酒吧道具提示（走近 / 悬停）
   let near = null, nd = 1e9;
   for (const pr of Object.values(world.props)) {
     const d = Math.hypot(P.x - pr.pos.x, P.z - pr.pos.z);
@@ -540,6 +562,11 @@ function updateWalk(dt) {
   G.nearProp = near;
   const pe = $('prompt');
   if (near) { pe.textContent = t('bar.prompt', { what: t(near.labelKey) }); pe.hidden = false; } else pe.hidden = true;
+  if (iso && G.isoHover) {
+    const pr = world.props[G.isoHover];
+    pe.textContent = t('bar.promptClick', { what: pr ? t(pr.labelKey) : t('venue.' + G.isoHover) });
+    pe.hidden = false;
+  }
   world.setCue({ visible: false });
   world.setAimLine(null);
   updateDeckUI();
@@ -706,6 +733,8 @@ function enterMini(id) {
     document.body.classList.add('free');
   }
   games[id].enter();
+  // 飞镖 / 骰子 / 酒吧点单需要指针锁：从俯视漫步（自由光标）进入时在这里补上
+  if (id === 'darts' || id === 'dice' || id === 'drink') lock();
   renderKeyHint();
 }
 function leaveMini(relock = true) {
@@ -715,7 +744,9 @@ function leaveMini(relock = true) {
   if ($('ludo-ui')) $('ludo-ui').hidden = true;
   if ($('chess-modal')) $('chess-modal').hidden = true;
   setReticle(false); G.mode = 'walk'; document.body.classList.remove('in-mini'); renderKeyHint();
-  if (relock && !isMobilePortrait() && !G.spectate) {
+  if (clubIso()) {
+    applyWalkView();   // 回到俯视漫步：自由光标，不需要指针锁
+  } else if (relock && !isMobilePortrait() && !G.spectate) {
     document.body.classList.remove('free');
     setTimeout(() => lock(), 120);
   }
@@ -827,7 +858,7 @@ const games = {
       if (this.active) { this.active = false; this.text = ''; }
       if ($('roulette-ui')) $('roulette-ui').hidden = true;
       if (G.avatarsEnabled && world.avatars.player) {
-        world.avatars.player.group.visible = !!G.thirdPerson;
+        world.avatars.player.group.visible = true;   // 回到俯视漫步（小人始终可见）
         world.avatars.player?.play('idle');
       }
     },
@@ -951,6 +982,7 @@ function isMobilePortrait() {
 }
 function lock() {
   if (G.touch || isMobilePortrait()) return;
+  if (G.mode === 'walk') return;   // 俯视漫步用自由光标，不加指针锁
   if (!G.started || G.spectate || document.pointerLockElement === canvas) return;
   clearTimeout(lockTimer); lockTries = 0;
   const attempt = () => {
@@ -972,7 +1004,7 @@ function resumeGame() {
 }
 function showPause(on) {
   const isMob = G.touch || isMobilePortrait();
-  G.paused = on; $('pause').hidden = !on; document.body.classList.toggle('free', on || G.mode === 'replay' || G.spectate || isMob);
+  G.paused = on; $('pause').hidden = !on; document.body.classList.toggle('free', on || G.mode === 'replay' || G.spectate || isMob || clubIso());
   if (isMob) {
     const deck = $('mobile-deck');
     if (deck) deck.hidden = on || !G.started;
@@ -985,7 +1017,7 @@ document.addEventListener('pointerlockchange', () => {
   if (locked) { clearTimeout(lockTimer); lockTries = 0; }
   document.body.classList.toggle('free', !locked || G.spectate || isMob);
   if (!G.started || G.spectate || isMob) return;
-  if (!locked && G.mode !== 'replay' && !anyDialog()) showPause(true);
+  if (!locked && G.mode !== 'replay' && !anyDialog() && !clubIso()) showPause(true);
   if (locked) showPause(false);
 });
 function anyDialog() {
@@ -1000,6 +1032,7 @@ function anyDialog() {
 }
 
 document.addEventListener('mousemove', (e) => {
+  if (clubIso() && document.pointerLockElement !== canvas) { isoHoverMove(e); return; }
   if (document.pointerLockElement !== canvas || G.paused) return;
   const dx = e.movementX, dy = e.movementY;
   if (G.mode === 'walk') {
@@ -1015,6 +1048,7 @@ document.addEventListener('mousedown', (e) => {
   if (!G.started || G.paused || e.button !== 0) return;
   if (document.pointerLockElement !== canvas) {
     if (e.target === canvas && !G.spectate && !G.touch && !isMobilePortrait() && !anyDialog()) lock();
+    if (clubIso() && e.target === canvas && !anyDialog()) { isoClick(e); return; }
     if (isMobilePortrait() && e.target === canvas && G.mode === 'place') confirmPlace();
     if (G.mode === 'ludo' && e.target === canvas) games.ludo?.onCanvasClick?.(e.clientX, e.clientY);
     return;
@@ -1043,15 +1077,8 @@ document.addEventListener('keydown', (e) => {
   }
 
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(c)) e.preventDefault();
-  if (c === 'Tab') {
-    if (G.mode === 'walk' || G.mode === 'aim') {
-      G.thirdPerson = !G.thirdPerson;
-      world.setAvatarFirstPerson('player', !G.thirdPerson);
-      if (world.avatars?.player) world.avatars.player.group.visible = !!G.thirdPerson;
-      toast(G.thirdPerson ? 'View: 3rd Person' : 'View: 1st Person', 800);
-    }
-    return;
-  }
+  if (c === 'Tab') return;   // 移动只走俯视：不再切第一人称漫步
+ 
   if (c === 'KeyM') { const m = audio.toggleMute(); toast(t(m ? 'msg.muted' : 'msg.unmuted'), 1000); return; }
   if (c === 'Escape' && G.mode !== 'replay') {
     if (launcherOpen) { closeLauncher(); return; }
@@ -1098,6 +1125,7 @@ document.addEventListener('keydown', (e) => {
       } else if (G.mode === 'aim') {
         G.mode = 'walk';
         renderKeyHint();
+        applyWalkView();   // 回到俯视漫步：松开指针锁 + 自由光标
       }
       break;
     case 'KeyQ': if (G.mode === 'walk' && G.nearProp) enterMini(G.nearProp.id); break;
@@ -1144,7 +1172,7 @@ function applyMode(restart) {
   document.body.classList.toggle('spectating', G.spectate);
   if (G.spectate) document.body.classList.add('free');
   if (restart) newGame(id === 'practice' ? 'practice' : 'match', true);
-  renderPickers(); renderVenues(); if (G.match) renderHUD();
+  renderPickers(); renderVenues(); renderThemeButtons(); if (G.match) renderHUD();
   updateDeckUI();
 }
 document.addEventListener('click', (e) => {
@@ -1168,9 +1196,22 @@ document.addEventListener('click', (e) => {
   }
   const dc = e.target.closest('[data-diff]');
   if (dc) { G.settings.diff = dc.dataset.diff; saveSettings(); renderPickers(); if (G.match) renderHUD(); return; }
+  const th = e.target.closest('[data-theme]');
+  if (th) {
+    G.settings.theme = th.dataset.theme; saveSettings();
+    world.applyTheme(G.settings.theme);
+    renderThemeButtons();
+    toast(t('msg.theme.' + G.settings.theme), 1200);
+    return;
+  }
   const cc = e.target.closest('[data-cam]');
   if (cc) setCam(cc.dataset.cam);
 });
+
+// 主题按钮状态（设置面板：霓虹 / 经典）
+function renderThemeButtons() {
+  document.querySelectorAll('[data-theme]').forEach((b) => b.classList.toggle('on', b.dataset.theme === (G.settings.theme || 'neon')));
+}
 
 // ---------------------------------------------------------------- 设置 / 面板
 function saveSettings() { store.set('settings', G.settings); }
@@ -1233,6 +1274,9 @@ function launchVenue(key) {
   const v = VENUES[key];
   if (!v || !G.started || G.spectate) return;
   if (G.mode === 'rolling' || G.mode === 'striking' || G.mode === 'cpu' || G.mode === 'place') { toast(t('launcher.busy'), 1200); return; }
+  G.isoHover = null; G.moveTarget = null;
+  world.hideIsoRing('hover'); world.hideIsoRing('move');
+  canvas.style.cursor = '';
   if (launcherOpen) { launcherOpen = false; $('launcher').hidden = true; }
   if (G.paused) showPause(false);
   G.player.x = v.x; G.player.z = v.z; G.player.yaw = v.yaw;
@@ -1246,10 +1290,47 @@ function launchVenue(key) {
     lock();
     toast('🎱 ' + t('venue.pool'), 900);
   } else {
-    enterMini(v.prop);
-    if (v.prop === 'darts' || v.prop === 'dice' || v.prop === 'drink') lock();   // 需要指针锁的游戏重新加锁
+    enterMini(v.prop);   // 需要指针锁的小游戏由 enterMini 统一加锁
   }
   updateDeckUI();
+}
+
+// ---------------------------------------------------------------- 俯视导航（等距视角）
+// 俱乐部走动一律用等距俯视：点击台位直达、点击地面走动、WASD 屏幕方向移动。
+// 台球与小游戏仍用各自的第一人称机位（进入时自动切换，离开时自动切回俯视）。
+function clubIso() {
+  return G.started && !G.spectate && G.mode === 'walk';
+}
+// 进入/回到俯视漫步：自由光标 + 松开指针锁 + 显示小人全身
+function applyWalkView() {
+  document.body.classList.add('free');
+  try { document.exitPointerLock?.(); } catch (_) { /* 忽略 */ }
+  if (world.avatars?.player) world.setAvatarFirstPerson('player', false);
+  renderKeyHint();
+}
+function isoNDC(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: ((e.clientX - r.left) / r.width) * 2 - 1, y: -((e.clientY - r.top) / r.height) * 2 + 1 };
+}
+function isoHoverMove(e) {
+  if (e.target !== canvas) {
+    if (G.isoHover) { G.isoHover = null; world.hideIsoRing('hover'); canvas.style.cursor = ''; }
+    return;
+  }
+  const id = world.isoHit(isoNDC(e));
+  if (id !== G.isoHover) {
+    G.isoHover = id;
+    if (id) { const m = world.markerMap[id]; world.showIsoRing('hover', m.x, m.z, m.r); }
+    else world.hideIsoRing('hover');
+  }
+  canvas.style.cursor = id ? 'pointer' : 'crosshair';
+}
+function isoClick(e) {
+  const ndc = isoNDC(e);
+  const id = world.isoHit(ndc);
+  if (id) { launchVenue(id); return; }
+  const pt = world.isoFloor(ndc);
+  if (pt) { G.moveTarget = pt; world.showIsoRing('move', pt.x, pt.z, 0.26); }
 }
 
 function updateMobilePortrait() {
@@ -1321,7 +1402,7 @@ function updateDeckUI() {
           enterBtn.textContent = '🎱 ' + t('deck.aim');
         }
       } else {
-        if (nearLbl) nearLbl.textContent = 'Swipe to look · Tap venue';
+        if (nearLbl) nearLbl.textContent = 'Tap venue · Tap floor to walk';
         if (enterBtn) {
           enterBtn.classList.remove('ready');
           enterBtn.textContent = t('deck.enter');
@@ -1465,13 +1546,6 @@ function setupDeckControls() {
     }
   });
 
-  $('deck-btn-avatar')?.addEventListener('click', () => {
-    G.thirdPerson = !G.thirdPerson;
-    world.setAvatarFirstPerson('player', !G.thirdPerson);
-    if (world.avatars?.player) world.avatars.player.group.visible = !!G.thirdPerson;
-    toast(G.thirdPerson ? 'View: 3rd Person' : 'View: 1st Person', 800);
-  });
-
   // Canvas Pointer & Touch Swiping (Aim / Walk / Free Ball)
   let dragStartX = 0, dragStartY = 0;
   let lastDragX = 0, lastDragY = 0;
@@ -1496,7 +1570,7 @@ function setupDeckControls() {
       prevent?.();
       G.aim.angle += dx * 0.0024;
       updateDeckUI();
-    } else if (G.mode === 'walk') {
+    } else if (G.mode === 'walk' && !clubIso()) {
       prevent?.();
       G.player.yaw += dx * 0.003;
       G.player.pitch = clamp(G.player.pitch - dy * 0.003, -1.2, 1.2);
@@ -1631,7 +1705,7 @@ function bindUI() {
   };
 
   $('alt-free').textContent = 'FREE BALL'; $('alt-settings').textContent = 'SETTINGS';
-  onLang(() => { renderPickers(); renderVenues(); renderCamBar(); if (G.match) renderHUD(); renderBadges(); $('alt-free').textContent = getLang() === 'zh' ? '自由球' : 'FREE BALL'; $('alt-settings').textContent = getLang() === 'zh' ? '设置' : 'SETTINGS'; if (G.replay) updateReplayUI(); if (!$('about').hidden) fillAbout(); });
+  onLang(() => { renderPickers(); renderVenues(); renderThemeButtons(); renderCamBar(); if (G.match) renderHUD(); renderBadges(); $('alt-free').textContent = getLang() === 'zh' ? '自由球' : 'FREE BALL'; $('alt-settings').textContent = getLang() === 'zh' ? '设置' : 'SETTINGS'; if (G.replay) updateReplayUI(); if (!$('about').hidden) fillAbout(); });
 }
 
 function openNetModal() {
@@ -1725,6 +1799,13 @@ function update(dt) {
     default: break;
   }
   if (G.mode !== 'darts' && G.mode !== 'place') setReticle(false);
+  world.setIso(clubIso());   // 漫步=正交俯视；其他模式（台球/小游戏/回放）用透视相机
+  if (G.mode === 'walk' && G.started && !G.spectate && document.pointerLockElement === canvas) applyWalkView();   // 回到漫步时任何路径都必须松开指针锁
+  if (!clubIso() && (G.isoHover || G.moveTarget)) {   // 离开俯视时收掉悬停/走位标记
+    G.isoHover = null; G.moveTarget = null;
+    world.hideIsoRing('hover'); world.hideIsoRing('move');
+    canvas.style.cursor = '';
+  }
 
   // 金币与网络同步
   if (coins) {
@@ -1772,6 +1853,7 @@ async function boot() {
   audio = new AudioEngine();
   world = new World(canvas);
   await world.init((done, total) => { $('loading-n').textContent = t('loading.assets', { done, total }); });
+  world.applyTheme(G.settings.theme || 'neon');
 
   coins = new CoinManager({
     audio,
@@ -1850,9 +1932,11 @@ async function boot() {
     $('start').hidden = true; $('hud').hidden = false; G.started = true;
     $('spectate').hidden = true;
     G.mode = 'walk';
+    applyWalkView();
     updateMobilePortrait();
     applyMode(true);
     if (G.spectate) toast(t(G.touch ? 'msg.touch' : 'mode.watch.d'));
+    else if (clubIso()) toast(t('msg.isoHint'), 2800);
     else { if (!G.touch && !isMobilePortrait()) lock(); toast(t('msg.break'), 1600); }
     renderHUD(); renderPower(); renderSpin(); renderCamBar();
     updateDeckUI();

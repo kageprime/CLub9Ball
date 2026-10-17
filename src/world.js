@@ -18,6 +18,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import * as TX from './textures.js';
 import { PICKUP_SPOTS } from './coins.js';
 import { Avatar, createAvatar } from './avatar.js';
+import { THEMES, ZONES } from './themes.js';
 
 export const TABLE_Y = 0.80;             // 台面离地高度
 export const ROOM = { x0: -4.2, x1: 4.2, z0: -3.0, z1: 3.0, h: 3.2 };
@@ -35,6 +36,8 @@ export class World {
     this.props = {};
     this.flashAmt = 0; this.flashColor = new THREE.Color(1, 0.2, 0.1);
     this.avatars = { player: null, opponent: null, dealer: null, bartender: null };
+    // 主题（classic=校准过的暖吧；neon=迈阿密霓虹夜）。main.js 在 init 后调用 applyTheme()。
+    this.theme = 'classic'; this.themeData = THEMES.classic; this._skyTex = null;
     // 相机平滑目标
     this.camPos = new V3(-2.4, 1.65, 0); this.camLook = new V3(0, 1.4, 0); this.camFov = 68;
     this.tgtPos = this.camPos.clone(); this.tgtLook = this.camLook.clone(); this.tgtFov = 68; this.camK = 30;
@@ -51,6 +54,13 @@ export class World {
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.Fog(0x241812, 8, 22);
     this.camera = new THREE.PerspectiveCamera(68, 16 / 9, 0.03, 40);
+    // 俯视导航（等距）相机：正交投影，render() 时二选一
+    this.isoCam = new THREE.OrthographicCamera(-6, 6, 4, -4, 0.1, 60);
+    this.isoMode = false;
+    this.isoPos = new V3(0, 10, 10); this.isoLook = new V3(0, 0, 0);
+    this.isoTgtPos = new V3(0, 10, 10); this.isoTgtLook = new V3(0, 0, 0);
+    this.isoView = 3.9; this.isoTgtView = 3.9; this.isoK = 6;
+    this._updateIsoFrustum();
 
     this._setupPost();
     this.resize();
@@ -64,6 +74,7 @@ export class World {
     this.walnutTex = await this._loadWalnut(); tick();
     this._buildLights();
     this._buildRoom();
+    this._buildThemeScenery();
     this._buildTable();
     this._buildBalls();
     this._buildCue();
@@ -148,6 +159,7 @@ export class World {
     this.rt.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    this._updateIsoFrustum();
     this.canvas.style.width = w * N + 'px';
     this.canvas.style.height = h * N + 'px';
     this.lowRes = { w, h, scale: N };
@@ -185,9 +197,11 @@ export class World {
 
   // ---------- 灯光 ----------
   _buildLights() {
-    this.scene.add(new THREE.AmbientLight(0x7a5a48, 0.70));
-    this.scene.add(new THREE.HemisphereLight(0xffe4c4, 0x281810, 0.45));
+    this.ambient = new THREE.AmbientLight(0x7a5a48, 0.70);
+    this.hemi = new THREE.HemisphereLight(0xffe4c4, 0x281810, 0.45);
+    this.scene.add(this.ambient, this.hemi);
     this.lamps = [];
+    this.bulbMats = [];
     for (const x of [-0.65, 0.65]) {
       const sp = new THREE.SpotLight(0xffe2b0, 55, 5.5, 0.62, 0.55, 1.4);
       sp.position.set(x, TABLE_Y + 1.35, 0);
@@ -199,8 +213,10 @@ export class World {
       // 吊灯罩
       const shade = this._cyl(0.06, 0.26, 0.2, this._mat(0x1c3a2a, { roughness: 0.5 }), x, TABLE_Y + 1.5, 0, this.scene, 10);
       shade.castShadow = false;
-      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), new THREE.MeshBasicMaterial({ color: 0xfff0c0 }));
+      const bulbMat = new THREE.MeshBasicMaterial({ color: 0xfff0c0 });
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), bulbMat);
       bulb.position.set(x, TABLE_Y + 1.4, 0); this.scene.add(bulb);
+      this.bulbMats.push(bulbMat);
       const cord = this._cyl(0.006, 0.006, 1.2, this._mat(0x111111), x, TABLE_Y + 2.1 + 0.2, 0, this.scene, 4);
       cord.castShadow = false;
       (this.lampMeshes ||= []).push(shade, bulb, cord);
@@ -210,14 +226,15 @@ export class World {
     this.fireLight.position.set(1.4, 0.7, ROOM.z1 - 0.7);
     this.scene.add(this.fireLight);
     // 休息区 / 棋牌角温暖补光
-    const loungeFill = new THREE.PointLight(0xffddb4, 4.5, 7.5, 1.4);
-    loungeFill.position.set(-2.8, 2.5, 0.5);
-    this.scene.add(loungeFill);
+    this.loungeFill = new THREE.PointLight(0xffddb4, 4.5, 7.5, 1.4);
+    this.loungeFill.position.set(-2.8, 2.5, 0.5);
+    this.scene.add(this.loungeFill);
     // 霓虹补光
+    this.neonPts = [];
     const neon = (c, x, y, z, i) => { const l = new THREE.PointLight(c, i, 5, 1.8); l.position.set(x, y, z); this.scene.add(l); return l; };
-    neon(0xff3fb0, ROOM.x1 - 0.5, 2.3, 0.4, 5);
-    neon(0x22d6e8, ROOM.x1 - 0.5, 2.3, -0.6, 4);
-    neon(0xffa030, -1.5, 2.6, -2.7, 3);
+    this.neonPts.push(neon(0xff3fb0, ROOM.x1 - 0.5, 2.3, 0.4, 5));
+    this.neonPts.push(neon(0x22d6e8, ROOM.x1 - 0.5, 2.3, -0.6, 4));
+    this.neonPts.push(neon(0xffa030, -1.5, 2.6, -2.7, 3));
   }
 
   // 俯视 / 高位机位会被吊灯挡住：这些网格只影响画面，光照不变
@@ -240,7 +257,8 @@ export class World {
     }
     if (!env) env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     this.scene.environment = env;
-    this.scene.environmentIntensity = this.status.hdri === 'loaded' ? 0.65 : 0.38;
+    const te = this.themeData.env;
+    this.scene.environmentIntensity = this.status.hdri === 'loaded' ? te.loaded : te.fallback;
     pmrem.dispose();
   }
 
@@ -251,7 +269,8 @@ export class World {
     const cx = (ROOM.x0 + ROOM.x1) / 2, cz = (ROOM.z0 + ROOM.z1) / 2;
 
     const floorTex = TX.makeFloor(); floorTex.repeat.set(W / 1.6, D / 1.6);
-    this._box(W, 0.1, D, new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.6 }), cx, -0.05, cz, g).castShadow = false;
+    this.floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.6 });
+    this._box(W, 0.1, D, this.floorMat, cx, -0.05, cz, g).castShadow = false;
     const ceil = this._box(W, 0.1, D, this._mat(0x2a1a10), cx, H + 0.05, cz, g, false);
     ceil.receiveShadow = false;
     const wallTex = (rx) => { const t = TX.makeWall(); t.repeat.set(rx, 1); return new THREE.MeshStandardMaterial({ map: t, roughness: 0.9 }); };
@@ -318,6 +337,85 @@ export class World {
     this._cyl(0.02, 0.02, 1.5, this._mat(0x222222), ROOM.x1 - 0.4, 0.75, 2.6, g, 4);
     const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffd890 }));
     lamp.position.set(ROOM.x1 - 0.4, 1.55, 2.6); g.add(lamp);
+
+    // 等距俯视（iso）做“剖屋”处理：镜头固定在 -x/+z 上方、看向 +x/-z，
+    // 因此隐藏天花板、横梁与镜头侧两面墙（x0 墙、z1 墙）及其墙面装饰，
+    // 否则它们会挡住整间房。吧台墙(z0)与霓虹/飞镖墙(x1)完整保留。
+    this.isoHide = g.children.filter((m) => m.position.y > 3.0 || m.position.z > 2.2 || m.position.x < -4.0);
+  }
+
+  // ---------- 主题布景（屋外日落地面 + 棕榈剪影 + 分区灯毯）----------
+  // 全部是静态网格：分区灯毯 4 片 + 地面 1 片 + 棕榈若干片，渲染开销可忽略。
+  // 默认隐藏，由 applyTheme() 按主题开关（霓虹夜显示；经典暖吧保持暗色留白）。
+  _buildThemeScenery() {
+    // 屋外地面：让房间在等距视角下像日落中的“舞台”，而不是浮在虚空里
+    this.scenery = new THREE.Group(); this.scenery.visible = false; this.scene.add(this.scenery);
+    this.groundMat = new THREE.MeshStandardMaterial({ color: 0x1a1030, roughness: 0.32, metalness: 0.5 });
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(46, 46), this.groundMat);
+    ground.rotation.x = -Math.PI / 2; ground.position.y = -0.02;
+    ground.castShadow = false; ground.receiveShadow = false;
+    this.scenery.add(ground);
+    // 棕榈剪影：双面贴片，统一转向等距镜头方向（-π/4）
+    const palmTex = TX.makePalm();
+    const palmMat = new THREE.MeshBasicMaterial({ map: palmTex, transparent: true, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
+    for (const [x, z, s] of [
+      [-7.4, 1.2, 1.35], [-5.6, 6.6, 1.15], [-0.4, 7.8, 1.25], [5.2, 6.4, 1.0],
+      [8.4, 1.8, 1.3], [-8.2, -4.2, 1.1], [4.8, -6.8, 1.2], [-3.2, -7.6, 0.95],
+    ]) {
+      const p = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 3.4), palmMat);
+      p.position.set(x, 1.7 * s, z); p.scale.setScalar(s); p.rotation.y = -Math.PI / 4;
+      this.scenery.add(p);
+    }
+    // 分区灯毯：分区色圆角霓虹描边（游标环 renderOrder 更高，始终压在上面）
+    this.zoneGroup = new THREE.Group(); this.zoneGroup.visible = false; this.scene.add(this.zoneGroup);
+    const px = 96;   // 每米像素
+    for (const zn of ZONES) {
+      const col = '#' + zn.color.toString(16).padStart(6, '0');
+      const tex = TX.makeZoneRug(Math.round(zn.w * px), Math.round(zn.d * px), col);
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(zn.w, zn.d),
+        new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false }),
+      );
+      mesh.rotation.x = -Math.PI / 2; mesh.position.set(zn.x, 0.008, zn.z); mesh.renderOrder = 3;
+      this.zoneGroup.add(mesh);
+    }
+  }
+
+  // ---------- 主题应用（灯光颜色/强度、雾、背景、曝光、地板、布景）----------
+  applyTheme(name) {
+    const key = THEMES[name] ? name : 'classic';
+    const t = THEMES[key];
+    this.theme = key; this.themeData = t;
+    // 雾 + 背景（等距时雾距保持推远状态，只换颜色；退出等距按新主题恢复）
+    const fog = this.scene.fog;
+    fog.color.set(t.fog.color);
+    if (this.isoMode) this._fogSave = { near: t.fog.near, far: t.fog.far };
+    else { fog.near = t.fog.near; fog.far = t.fog.far; }
+    this.renderer.setClearColor(t.clear, 1);
+    if (t.sky) { this._skyTex ||= TX.makeSky(); this.scene.background = this._skyTex; }
+    else this.scene.background = null;
+    // 全局光
+    this.ambient.color.set(t.ambient.color); this.ambient.intensity = t.ambient.i;
+    this.hemi.color.set(t.hemi.sky); this.hemi.groundColor.set(t.hemi.ground); this.hemi.intensity = t.hemi.i;
+    for (const sp of this.lamps) { sp.color.set(t.spot.color); sp.intensity = t.spot.i; }
+    this.fireLight.color.set(t.fire.color); this.fireLight.intensity = t.fire.i;
+    this.loungeFill.color.set(t.lounge.color); this.loungeFill.intensity = t.lounge.i;
+    this.neonPts.forEach((l, i) => { const d = t.neon[i] || t.neon[0]; l.color.set(d.color); l.intensity = d.i; });
+    this.bulbMats.forEach((m, i) => m.color.set(t.bulbs[i] ?? t.bulbs[0]));
+    // 环境反射强度 + 后处理曝光
+    if (this.scene.environment) this.scene.environmentIntensity = this.status.hdri === 'loaded' ? t.env.loaded : t.env.fallback;
+    if (this.postMat) this.postMat.uniforms.uExposure.value = t.exposure;
+    // 地板：霓虹夜更亮更反光（潮湿地板感）
+    if (this.floorMat) {
+      this.floorMat.roughness = t.floor.roughness;
+      this.floorMat.metalness = t.floor.metalness;
+      this.floorMat.envMapIntensity = t.floor.env;
+      this.floorMat.needsUpdate = true;
+    }
+    // 屋外布景与分区灯毯
+    if (this.scenery) this.scenery.visible = !!t.sky;
+    if (this.zoneGroup) this.zoneGroup.visible = !!t.zones;
+    return key;
   }
 
   // ---------- 球桌 ----------
@@ -1205,7 +1303,7 @@ export class World {
     const rct = this.canvas.getBoundingClientRect();
     const mouse = new THREE.Vector2(((screenX - rct.left) / rct.width) * 2 - 1, -((screenY - rct.top) / rct.height) * 2 + 1);
     const ray = new THREE.Raycaster();
-    ray.setFromCamera(mouse, this.camera);
+    ray.setFromCamera(mouse, this.activeCam);
     const meshes = [];
     for (const p of [0, 1, 2, 3]) {
       for (const tok of this.ludoTokens[p] || []) {
@@ -1376,6 +1474,88 @@ export class World {
     }
   }
 
+  // ---------- 俯视导航：等距相机 ----------
+  _updateIsoFrustum() {
+    const a = this.camera.aspect || 16 / 9, v = this.isoView;
+    this.isoCam.left = -v * a; this.isoCam.right = v * a;
+    this.isoCam.top = v; this.isoCam.bottom = -v;
+    this.isoCam.updateProjectionMatrix();
+  }
+  setIsoCameraTarget(pos, look, { view = null, snap = false, k = null } = {}) {
+    this.isoTgtPos.copy(pos); this.isoTgtLook.copy(look);
+    if (view != null) this.isoTgtView = view;
+    if (k != null) this.isoK = k;
+    if (snap) { this.isoPos.copy(pos); this.isoLook.copy(look); this.isoView = this.isoTgtView; this._updateIsoFrustum(); }
+  }
+  setIso(on) {
+    if (this.isoMode === on) return;
+    this.isoMode = on;
+    // 剖屋：等距时隐藏天花板/横梁与镜头侧墙面，退出时恢复
+    if (this.isoHide) for (const m of this.isoHide) m.visible = !on;
+    // 等距相机离房间很近（正交投影与距离无关），把雾推远，避免整间房蒙灰
+    const fog = this.scene.fog;
+    if (fog) {
+      if (on) { this._fogSave = { near: fog.near, far: fog.far }; fog.near = 16; fog.far = 44; }
+      else if (this._fogSave) { fog.near = this._fogSave.near; fog.far = this._fogSave.far; this._fogSave = null; }
+    }
+    if (on) { this.isoPos.copy(this.isoTgtPos); this.isoLook.copy(this.isoTgtLook); this.isoView = this.isoTgtView; this._updateIsoFrustum(); }
+  }
+  get activeCam() { return this.isoMode ? this.isoCam : this.camera; }
+
+  // ---------- 俯视导航：台位点击标记 & 高亮环 ----------
+  // 标记体不进场景（不渲染），只用于正交相机的点击拾取。
+  buildVenueMarkers() {
+    const mk = (id, x, z, r) => {
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 2.6, 10));
+      m.position.set(x, 1.3, z); m.userData.venue = id; m.updateMatrixWorld(true);
+      return m;
+    };
+    this.markers = [];
+    this.markerMap = {};
+    const add = (id, x, z, r) => { this.markers.push(mk(id, x, z, r)); this.markerMap[id] = { x, z, r }; };
+    add('pool', 0, 0, 1.50);
+    for (const [id, pr] of Object.entries(this.props)) add(id, pr.pos.x, pr.pos.z, Math.max(0.5, (pr.radius || 1) * 0.82));
+    const ring = (color) => {
+      const mesh = new THREE.Mesh(
+        new THREE.RingGeometry(0.85, 1.0, 28),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false }),
+      );
+      mesh.rotation.x = -Math.PI / 2; mesh.visible = false; mesh.renderOrder = 5;
+      return mesh;
+    };
+    this.ringHover = ring(0xffb84a);   // 悬停：金
+    this.ringMove = ring(0x58d7ff);    // 走位目标：青
+    this.scene.add(this.ringHover, this.ringMove);
+  }
+  _isoRay(ndc) {
+    if (!this.markers) this.buildVenueMarkers();
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(new THREE.Vector2(ndc.x, ndc.y), this.isoCam);
+    return ray;
+  }
+  isoHit(ndc) {
+    const hits = this._isoRay(ndc).intersectObjects(this.markers, false);
+    return hits.length ? hits[0].object.userData.venue : null;
+  }
+  isoFloor(ndc) {
+    const ray = this._isoRay(ndc);
+    const hit = new V3();
+    if (!ray.ray.intersectPlane(new THREE.Plane(new V3(0, 1, 0), 0), hit)) return null;
+    // 夹在可行走区域（与 walkCollide 一致）
+    return { x: Math.max(-3.9, Math.min(3.9, hit.x)), z: Math.max(-1.8, Math.min(2.5, hit.z)) };
+  }
+  showIsoRing(kind, x, z, r) {
+    if (!this.ringHover) this.buildVenueMarkers();
+    const ring = kind === 'hover' ? this.ringHover : this.ringMove;
+    ring.scale.setScalar(Math.max(0.22, r));
+    ring.position.set(x, 0.012, z);
+    ring.visible = true;
+  }
+  hideIsoRing(kind) {
+    const ring = kind === 'hover' ? this.ringHover : this.ringMove;
+    if (ring) ring.visible = false;
+  }
+
   // ---------- 相机 ----------
   setCameraTarget(pos, look, { fov = null, snap = false, k = null } = {}) {
     this.tgtPos.copy(pos); this.tgtLook.copy(look);
@@ -1396,6 +1576,15 @@ export class World {
     this.camera.position.copy(this.camPos);
     this.camera.lookAt(this.camLook);
     if (Math.abs(this.camera.fov - this.camFov) > 0.01) { this.camera.fov = this.camFov; this.camera.updateProjectionMatrix(); }
+    // 俯视导航相机阻尼（只在 isoMode 时生效；render() 用 activeCam）
+    if (this.isoMode) {
+      const ai = 1 - Math.exp(-dt * this.isoK);
+      this.isoPos.lerp(this.isoTgtPos, ai); this.isoLook.lerp(this.isoTgtLook, ai);
+      this.isoView += (this.isoTgtView - this.isoView) * ai;
+      this.isoCam.position.copy(this.isoPos);
+      this.isoCam.lookAt(this.isoLook);
+      this._updateIsoFrustum();
+    }
     // 壁炉闪烁
     const f = 0.85 + 0.25 * Math.sin(this.time * 9.1) * Math.sin(this.time * 5.3 + 1) + 0.1 * Math.sin(this.time * 23);
     this.fireLight.intensity = 9 * f;
@@ -1410,7 +1599,7 @@ export class World {
   render() {
     const r = this.renderer;
     r.setRenderTarget(this.rt);
-    r.render(this.scene, this.camera);
+    r.render(this.scene, this.activeCam);
     r.setRenderTarget(null);
     r.render(this.postScene, this.postCam);
   }
@@ -1418,7 +1607,7 @@ export class World {
   // 屏幕 → 台面（用于自由球摆放）。ndc: {x,y} ∈ [-1,1]
   pickTable(ndc) {
     const ray = new THREE.Raycaster();
-    ray.setFromCamera(new THREE.Vector2(ndc.x, ndc.y), this.camera);
+    ray.setFromCamera(new THREE.Vector2(ndc.x, ndc.y), this.activeCam);
     const plane = new THREE.Plane(new V3(0, 1, 0), -(TABLE_Y + BALL_R));
     const hit = new V3();
     return ray.ray.intersectPlane(plane, hit) ? { x: hit.x, z: hit.z } : null;

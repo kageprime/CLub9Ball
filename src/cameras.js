@@ -114,3 +114,32 @@ export class CameraRig {
 }
 
 export const CAM_KEYS = { Digit1: 'auto', Digit2: 'behind', Digit3: 'top', Digit4: 'broadcast', Digit5: 'side', Digit6: 'orbit', Digit7: 'chase', Digit8: 'thirdPerson' };
+
+// ---------- 俱乐部俯视导航相机（等距） ----------
+// 相机固定在 (-x, +z) 一侧上方（yaw 135°），俯角约 40°，用正交投影看整间房；
+// 该角度保留吧台墙(z0)与霓虹/飞镖墙(x1)的正面，剖屋时只隐藏镜头侧两面墙。
+// 跟随时只让视线中心做小幅平移（pan 夹紧在房间构图内），保证始终能看到大部分房间。
+export const ISO = { yaw: Math.PI * 0.75, pitch: 0.70, view: 4.25, pan: 0.9, dist: 7, k: 6 };
+
+// 屏幕方向基向量（俯视下的 WASD）：
+// W（屏幕上）= 相机前方地面投影；D（屏幕右）= 相机右方。
+export function isoBasis() {
+  const c = Math.cos(ISO.yaw), s = Math.sin(ISO.yaw);
+  return { fx: -c, fz: -s, rx: s, rz: -c };
+}
+
+// 由玩家位置求等距相机 { pos, look, view, k }；view 为竖直半高（世界单位）。
+export function computeIsoCam({ x = 0, z = 0, aspect = 16 / 9 } = {}) {
+  const cx = clamp(x * 0.45, -ISO.pan, ISO.pan);
+  const cz = clamp(z * 0.6, -ISO.pan, ISO.pan);
+  const cosP = Math.cos(ISO.pitch), sinP = Math.sin(ISO.pitch);
+  const pos = new V3(
+    cx + Math.cos(ISO.yaw) * cosP * ISO.dist,
+    sinP * ISO.dist,
+    cz + Math.sin(ISO.yaw) * cosP * ISO.dist,
+  );
+  const look = new V3(cx, 0, cz);
+  // 竖屏 / 窄屏自动拉远，保证水平方向仍装得下整间房（含跟随平移的边角）
+  const view = aspect < 1.55 ? ISO.view * (1.55 / Math.max(0.5, aspect)) : ISO.view;
+  return { pos, look, view, k: ISO.k };
+}

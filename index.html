@@ -126,7 +126,7 @@
   <div id="deck-lounge-view" hidden>
     <div class="lounge-header">
       <span class="lounge-title" data-i18n="deck.lounge">CLUB No.9 LOUNGE</span>
-      <span class="lounge-sub" id="lounge-near-status">Swipe upper screen to look</span>
+      <span class="lounge-sub" id="lounge-near-status">Tap venue · Tap floor to walk</span>
     </div>
     <div class="lounge-venues" id="lounge-venues">
       <button class="btn lounge-vcard" data-venue="pool">
@@ -161,9 +161,6 @@
     <div class="lounge-action-bar">
       <button class="btn big lounge-enter-btn" id="lounge-btn-enter">
         <span data-i18n="deck.enter">ENTER / PLAY</span>
-      </button>
-      <button class="btn lounge-view-btn" id="deck-btn-avatar">
-        <span>👤 3rd/1st</span>
       </button>
     </div>
   </div>
@@ -309,6 +306,8 @@
     <h2 data-i18n="settings.title"></h2>
     <div class="field"><span data-i18n="settings.language"></span>
       <span><button class="btn small" data-lang="zh">中文</button> <button class="btn small" data-lang="en">English</button></span></div>
+    <div class="field"><span data-i18n="settings.theme"></span>
+      <span><button class="btn small" data-theme="neon" data-i18n="theme.neon"></button> <button class="btn small" data-theme="classic" data-i18n="theme.classic"></button></span></div>
     <label class="field"><span data-i18n="settings.closeup"></span><input type="checkbox" id="set-closeup"></label>
     <label class="field"><span data-i18n="settings.aimline"></span><input type="checkbox" id="set-aim"></label>
     <label class="field"><span data-i18n="settings.sound"></span><input type="range" id="set-vol" min="0" max="1" step="0.05"></label>

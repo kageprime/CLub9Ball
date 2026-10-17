@@ -254,3 +254,70 @@ export function makeCueTexture() {
   g.fillStyle = '#6a3d20'; g.fillRect(0, 192, 32, 6); g.fillRect(0, 240, 32, 6);
   return toTex(c);
 }
+
+// 迈阿密日落天空：作为 scene.background，等距镜头下出现在房间之外（屋外布景）
+export function makeSky() {
+  const [c, g] = canvas(160, 100);
+  const grad = g.createLinearGradient(0, 0, 0, 100);
+  grad.addColorStop(0.00, '#0b0530');
+  grad.addColorStop(0.38, '#2a0e55');
+  grad.addColorStop(0.60, '#7a1a72');
+  grad.addColorStop(0.74, '#e0356a');
+  grad.addColorStop(0.84, '#ff7a3a');
+  grad.addColorStop(0.90, '#ffb85a');
+  grad.addColorStop(1.00, '#1c0a30');
+  g.fillStyle = grad; g.fillRect(0, 0, 160, 100);
+  // 星星（像素点）与落日
+  const rng = mulberry32(707);
+  g.fillStyle = '#cfe8ff';
+  for (let i = 0; i < 40; i++) g.fillRect((rng() * 160) | 0, (rng() * 34) | 0, 1, 1);
+  g.fillStyle = '#ffd36a'; g.shadowColor = '#ff8a4a'; g.shadowBlur = 16;
+  g.beginPath(); g.arc(122, 79, 9, 0, Math.PI * 2); g.fill();
+  g.shadowBlur = 0;
+  return toTex(c);
+}
+
+// 棕榈剪影贴片：屋外装饰（正面朝等距镜头，粉色霓虹描边）
+export function makePalm() {
+  const [c, g] = canvas(128, 192);
+  const dark = '#120a24';
+  g.strokeStyle = dark; g.fillStyle = dark;
+  g.shadowColor = '#ff3fb0'; g.shadowBlur = 7;
+  g.lineCap = 'round';
+  g.lineWidth = 9;                                    // 树干
+  g.beginPath(); g.moveTo(66, 190); g.quadraticCurveTo(60, 132, 62, 84); g.stroke();
+  g.lineWidth = 6;                                    // 叶冠
+  const frond = (x1, y1, cx1, cy1) => { g.beginPath(); g.moveTo(62, 84); g.quadraticCurveTo(cx1, cy1, x1, y1); g.stroke(); };
+  frond(26, 46, 40, 52); frond(12, 60, 30, 62); frond(6, 84, 26, 78); frond(14, 108, 30, 100);
+  frond(102, 52, 88, 56); frond(118, 72, 98, 70); frond(116, 96, 96, 88);
+  g.beginPath(); g.arc(62, 82, 7, 0, Math.PI * 2); g.fill();
+  g.shadowBlur = 0;
+  return toTex(c);
+}
+
+// 分区灯毯：圆角霓虹描边 + 柔和内发光（迈阿密分区用，尺寸按米传入）
+export function makeZoneRug(w = 224, h = 140, color = '#ff4fa8') {
+  const [c, g] = canvas(w, h);
+  const r = Math.min(26, h * 0.22), inset = 6;
+  const round = (x, y, ww, hh, rr) => {
+    g.beginPath();
+    g.moveTo(x + rr, y);
+    g.arcTo(x + ww, y, x + ww, y + hh, rr);
+    g.arcTo(x + ww, y + hh, x, y + hh, rr);
+    g.arcTo(x, y + hh, x, y, rr);
+    g.arcTo(x, y, x + ww, y, rr);
+    g.closePath();
+  };
+  round(inset, inset, w - inset * 2, h - inset * 2, r);
+  g.fillStyle = color; g.globalAlpha = 0.12; g.fill(); g.globalAlpha = 1;
+  g.shadowColor = color; g.shadowBlur = 14;           // 外描边：霓虹光
+  g.strokeStyle = color; g.lineWidth = 5;
+  round(inset + 2.5, inset + 2.5, w - (inset + 2.5) * 2, h - (inset + 2.5) * 2, r);
+  g.stroke();
+  g.shadowBlur = 0;
+  g.globalAlpha = 0.4; g.lineWidth = 2;               // 内描边：细线
+  round(inset + 12, inset + 12, w - (inset + 12) * 2, h - (inset + 12) * 2, Math.max(6, r - 8));
+  g.stroke();
+  g.globalAlpha = 1;
+  return toTex(c);
+}

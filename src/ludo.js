@@ -657,7 +657,7 @@ export function createLudoMini({ world, audio, coins, toast, unlock, t, $ }) {
     document.body.classList.remove('in-mini');
 
     if (world?.avatars?.player) {
-      world.avatars.player.group.visible = !!world.thirdPerson;
+      world.avatars.player.group.visible = true;   // 离开后回到俯视漫步：小人始终可见
     }
   }
 
